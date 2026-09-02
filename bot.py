@@ -1,10 +1,18 @@
 # ====================== SETTINGS ======================
 TOKEN = "import os
 from dotenv import load_dotenv
+from zoneinfo import ZoneInfo
+import discord
+from discord.ext import commands
+from discord import app_commands
+import sqlite3
+from datetime import datetime
+import random
 
 load_dotenv()
 
-TOKEN = os.getenv("DISCORD_TOKEN")"          # ← Put your bot token here
+TOKEN = os.getenv("DISCORD_TOKEN")
+"          # ← Put your bot token here
 TZ = ZoneInfo("Asia/Shanghai")         # UTC+8
 # ======================================================
 
