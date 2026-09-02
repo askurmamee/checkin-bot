@@ -11,10 +11,12 @@ import sqlite3
 from datetime import datetime
 import random
 
+from dotenv import load_dotenv
 load_dotenv()
 
 TOKEN = os.getenv("DISCORD_TOKEN")
-"          # ← Put your bot token here
+"   # or "TOKEN" — pick one and stick to it
+# Do NOT put any " right after this line
 TZ = ZoneInfo("Asia/Shanghai")         # UTC+8
 # ======================================================
 
