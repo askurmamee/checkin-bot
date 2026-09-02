@@ -9,6 +9,7 @@ from discord import app_commands
 import sqlite3
 from datetime import datetime
 import random
+
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN") # ← set this in Railway's Variables tab
 TZ = ZoneInfo("Asia/Shanghai") # UTC+8
@@ -27,10 +28,21 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
+
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
+    # Use a connection timeout and WAL mode to reduce "database is locked"
+    # errors when sqlite is accessed concurrently. check_same_thread=False
+    # allows connections to be used across threads safely when each
+    # command opens its own connection.
+    conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("PRAGMA journal_mode=WAL;")
+    except Exception:
+        # If PRAGMA fails for any reason, ignore — the DB will still work.
+        pass
     return conn
+
 def init_db():
     conn = get_db()
     c = conn.cursor()
@@ -49,6 +61,7 @@ def init_db():
     """)
     conn.commit()
     conn.close()
+
 def get_start_date():
     conn = get_db()
     c = conn.cursor()
@@ -58,6 +71,7 @@ def get_start_date():
     if row:
         return datetime.strptime(row["value"], "%Y-%m-%d").date()
     return None
+
 def set_start_date(date_str):
     conn = get_db()
     c = conn.cursor()
@@ -67,6 +81,7 @@ def set_start_date(date_str):
     )
     conn.commit()
     conn.close()
+
 def get_current_event_day():
     start = get_start_date()
     if not start:
@@ -76,6 +91,7 @@ def get_current_event_day():
     if 1 <= day_num <= 7:
         return day_num
     return None
+
 @bot.event
 async def on_ready():
     init_db()
@@ -86,6 +102,7 @@ async def on_ready():
         print(f"Synced {len(synced)} commands")
     except Exception as e:
         print(e)
+
 @tree.command(name="checkin", description="Check in for today")
 async def checkin(interaction: discord.Interaction):
     day = get_current_event_day()
@@ -122,6 +139,7 @@ async def checkin(interaction: discord.Interaction):
         f" **Checked in for Day {day}!**\nYour progress: **{progress}/7**",
         ephemeral=False,
     )
+
 @tree.command(name="progress", description="See your check-in progress")
 async def progress(interaction: discord.Interaction):
     user_id = interaction.user.id
@@ -139,8 +157,9 @@ async def progress(interaction: discord.Interaction):
         f"**Your progress: {progress}/7**\nDays completed: {days_str}",
         ephemeral=True,
     )
+
 @tree.command(name="setstartdate", description="ADMIN: Set the event start date (YYYY-MM-DD)")
-@app_commands.describe(date="Start date in YYYY-MM-DD format (example: 2026-09-05)")
+@app_commands.describe(date="Start date in YYYY-MM-DD format (example: 2026-09-05")
 @app_commands.checks.has_permissions(administrator=True)
 async def setstartdate(interaction: discord.Interaction, date: str):
     try:
@@ -154,6 +173,7 @@ async def setstartdate(interaction: discord.Interaction, date: str):
     await interaction.response.send_message(
         f" Event start date set to **{date}** (Day 1)", ephemeral=True
     )
+
 @tree.command(name="dailydraw", description="ADMIN: Draw 1 Daily Lucky Star winner")
 @app_commands.checks.has_permissions(administrator=True)
 async def dailydraw(interaction: discord.Interaction):
@@ -182,6 +202,7 @@ async def dailydraw(interaction: discord.Interaction):
         f"Congratulations {winner.mention}!\n"
         f"You won **1 SC**!"
     )
+
 @tree.command(name="finaldraw", description="ADMIN: Draw the Final Lucky Draw winners (only players with 7/7)")
 @app_commands.checks.has_permissions(administrator=True)
 async def finaldraw(interaction: discord.Interaction):
@@ -223,6 +244,7 @@ async def finaldraw(interaction: discord.Interaction):
             index += 1
     message = " **FINAL LUCKY DRAW WINNERS** \n\n" + "\n".join(results)
     await interaction.followup.send(message)
+
 @tree.command(name="eligible", description="ADMIN: Show how many players have 7/7")
 @app_commands.checks.has_permissions(administrator=True)
 async def eligible(interaction: discord.Interaction):
@@ -240,6 +262,7 @@ async def eligible(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"Players with 7/7: **{count}**", ephemeral=True
     )
+
 # Error handler for missing permissions
 @setstartdate.error
 @dailydraw.error
@@ -253,4 +276,5 @@ async def admin_error(interaction: discord.Interaction, error):
         )
     else:
         raise error
+
 bot.run(TOKEN)
