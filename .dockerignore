@@ -1,0 +1,10 @@
+.venv
+venv
+__pycache__
+*.pyc
+*.db
+checkins.db
+checkin.db
+.git
+.env
+.env.*
