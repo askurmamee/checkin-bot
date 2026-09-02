@@ -1,7 +1,7 @@
 # ====================== SETTINGS ======================
 import os
 
-TOKEN = os.getenv9("Token")
+TOKEN = os.getenv("TOKEN")
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 import discord
