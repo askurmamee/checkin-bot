@@ -12,6 +12,14 @@ import random
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN") # ← set this in Railway's Variables tab
+# Optional: set TEST_GUILD_ID to a guild (server) id to register commands instantly for testing
+TEST_GUILD_ID = os.getenv("TEST_GUILD_ID")
+if TEST_GUILD_ID:
+    try:
+        TEST_GUILD_ID = int(TEST_GUILD_ID)
+    except Exception:
+        TEST_GUILD_ID = None
+
 TZ = ZoneInfo("Asia/Shanghai") # UTC+8
 # Persistent DB path. Set DB_PATH=/data/checkins.db in Railway once you've
 # attached a volume mounted at /data. Falls back to a local file so this
@@ -130,11 +138,18 @@ async def on_ready():
     init_db()
     print(f"Bot is online as {bot.user}")
     print(f"Using database at: {os.path.abspath(DB_PATH)}")
+    # Sync commands. If TEST_GUILD_ID is set, sync to that guild for fast
+    # rollout during testing. Otherwise sync globally (may take up to 1 hour).
     try:
-        synced = await tree.sync()
-        print(f"Synced {len(synced)} commands")
+        if TEST_GUILD_ID:
+            guild_obj = discord.Object(id=TEST_GUILD_ID)
+            synced = await tree.sync(guild=guild_obj)
+            print(f"Synced {len(synced)} commands to guild {TEST_GUILD_ID}")
+        else:
+            synced = await tree.sync()
+            print(f"Synced {len(synced)} global commands")
     except Exception as e:
-        print(e)
+        print("Error syncing commands:", e)
 
 @tree.command(name="checkin", description="Check in for today")
 async def checkin(interaction: discord.Interaction):
