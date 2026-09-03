@@ -27,6 +27,7 @@ client.once('ready', async () => {
 
     const msg = await ch.send(MESSAGE_CONTENT);
     await msg.react('✅');
+    await msg.react('👍');
     console.log('Posted message:', msg.id, 'in channel', CHECKIN_CHANNEL_ID);
   } catch (err) {
     console.error('Failed to post reaction message', err);
