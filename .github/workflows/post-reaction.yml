@@ -1,0 +1,32 @@
+name: Post Reaction Checkin
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel_id:
+        description: '(Optional) Channel ID to post the check-in message in'
+        required: false
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies (if package.json exists)
+        run: |
+          if [ -f package-lock.json ]; then npm ci --silent; elif [ -f package.json ]; then npm install --silent; else echo "no package.json, skipping install"; fi
+
+      - name: Run test_reaction_post
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          CHECKIN_CHANNEL_ID: ${{ inputs.channel_id }}
+        run: |
+          echo "Using CHECKIN_CHANNEL_ID=${CHECKIN_CHANNEL_ID}"
+          node test_reaction_post.js

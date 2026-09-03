@@ -1,0 +1,25 @@
+name: Register Guild Commands
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Install dependencies (if package.json exists)
+        run: |
+          if [ -f package-lock.json ]; then npm ci --silent; elif [ -f package.json ]; then npm install --silent; else echo "no package.json, skipping install"; fi
+
+      - name: Run registration script
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+        run: node register_guild_commands.js
