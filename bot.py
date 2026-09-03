@@ -26,7 +26,6 @@ if not TOKEN:
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-intents.reactions = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
 
@@ -80,38 +79,6 @@ def set_start_date(date_str):
         "INSERT OR REPLACE INTO settings (key, value) VALUES ('start_date', ?)",
         (date_str,),
     )
-    conn.commit()
-    conn.close()
-
-# Helper to save/get checkin message for a given day
-def set_checkin_message(day, channel_id, message_id):
-    conn = get_db()
-    c = conn.cursor()
-    key = f"checkin_message_{day}"
-    value = f"{channel_id}:{message_id}"
-    c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)", (key, value))
-    conn.commit()
-    conn.close()
-
-def get_checkin_message(day):
-    conn = get_db()
-    c = conn.cursor()
-    key = f"checkin_message_{day}"
-    c.execute("SELECT value FROM settings WHERE key = ?", (key,))
-    row = c.fetchone()
-    conn.close()
-    if row and row["value"]:
-        try:
-            ch, mid = row["value"].split(":")
-            return int(ch), int(mid)
-        except Exception:
-            return None
-    return None
-
-def clear_checkin_messages():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("DELETE FROM settings WHERE key LIKE 'checkin_message_%'")
     conn.commit()
     conn.close()
 
@@ -191,9 +158,9 @@ async def progress(interaction: discord.Interaction):
         ephemeral=True,
     )
 
-@app_commands.checks.has_permissions(administrator=True)
 @tree.command(name="setstartdate", description="ADMIN: Set the event start date (YYYY-MM-DD)")
-@app_commands.describe(date="Start date in YYYY-MM-DD format (example: 2026-09-05)")
+@app_commands.describe(date="Start date in YYYY-MM-DD format (example: 2026-09-05")
+@app_commands.checks.has_permissions(administrator=True)
 async def setstartdate(interaction: discord.Interaction, date: str):
     try:
         datetime.strptime(date, "%Y-%m-%d")
@@ -207,8 +174,8 @@ async def setstartdate(interaction: discord.Interaction, date: str):
         f" Event start date set to **{date}** (Day 1)", ephemeral=True
     )
 
-@app_commands.checks.has_permissions(administrator=True)
 @tree.command(name="dailydraw", description="ADMIN: Draw 1 Daily Lucky Star winner")
+@app_commands.checks.has_permissions(administrator=True)
 async def dailydraw(interaction: discord.Interaction):
     day = get_current_event_day()
     if day is None:
@@ -236,8 +203,8 @@ async def dailydraw(interaction: discord.Interaction):
         f"You won **1 SC**!"
     )
 
-@app_commands.checks.has_permissions(administrator=True)
 @tree.command(name="finaldraw", description="ADMIN: Draw the Final Lucky Draw winners (only players with 7/7)")
+@app_commands.checks.has_permissions(administrator=True)
 async def finaldraw(interaction: discord.Interaction):
     # Defer immediately: this command can fetch up to 14 users sequentially,
     # which will blow past Discord's 3-second interaction deadline.
@@ -278,8 +245,8 @@ async def finaldraw(interaction: discord.Interaction):
     message = " **FINAL LUCKY DRAW WINNERS** \n\n" + "\n".join(results)
     await interaction.followup.send(message)
 
-@app_commands.checks.has_permissions(administrator=True)
 @tree.command(name="eligible", description="ADMIN: Show how many players have 7/7")
+@app_commands.checks.has_permissions(administrator=True)
 async def eligible(interaction: discord.Interaction):
     conn = get_db()
     c = conn.cursor()
@@ -296,112 +263,11 @@ async def eligible(interaction: discord.Interaction):
         f"Players with 7/7: **{count}**", ephemeral=True
     )
 
-# New admin command: reset the giveaway (clear check-ins and set start date to today)
-@app_commands.checks.has_permissions(administrator=True)
-@tree.command(name="resetgiveaway", description="ADMIN: Reset giveaway — clear all check-ins and start today")
-async def resetgiveaway(interaction: discord.Interaction):
-    today_str = datetime.now(TZ).strftime("%Y-%m-%d")
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("DELETE FROM checkins")
-    c.execute("DELETE FROM settings WHERE key LIKE 'checkin_message_%'")
-    conn.commit()
-    conn.close()
-    set_start_date(today_str)
-    await interaction.response.send_message(f"Giveaway reset. Start date set to {today_str}. All check-ins cleared.", ephemeral=True)
-
-# New admin command: post check-in message for the current day (bot will add 👍)
-@app_commands.checks.has_permissions(administrator=True)
-@tree.command(name="postcheckin", description="ADMIN: Post a check-in message for today and add 👍 reaction")
-async def postcheckin(interaction: discord.Interaction):
-    day = get_current_event_day()
-    if day is None:
-        await interaction.response.send_message("Event is not active today. Set a start date first.", ephemeral=True)
-        return
-    # Send a message to the current channel and add a 👍 reaction
-    channel = interaction.channel
-    msg = await channel.send(f"React with 👍 to check in for Day {day}!")
-    try:
-        await msg.add_reaction('👍')
-    except Exception:
-        pass
-    set_checkin_message(day, channel.id, msg.id)
-    await interaction.response.send_message("Check-in message posted and 👍 added.", ephemeral=True)
-
-# Reaction handlers: use raw events so they work even if the message isn't cached
-@bot.event
-async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    # Ignore the bot's own reactions
-    if payload.user_id == bot.user.id:
-        return
-    # Only care about 👍 reactions
-    try:
-        emoji = str(payload.emoji)
-    except Exception:
-        return
-    if emoji != '👍':
-        return
-    day = get_current_event_day()
-    if day is None:
-        return
-    stored = get_checkin_message(day)
-    if not stored:
-        return
-    channel_id, message_id = stored
-    if payload.message_id != message_id:
-        return
-    user_id = payload.user_id
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT 1 FROM checkins WHERE user_id = ? AND event_day = ?", (user_id, day))
-    if not c.fetchone():
-        c.execute("INSERT INTO checkins (user_id, event_day) VALUES (?, ?)", (user_id, day))
-        conn.commit()
-        # Try to DM the user as confirmation (may fail if DMs are closed)
-        try:
-            user = await bot.fetch_user(user_id)
-            await user.send(f"Checked in for Day {day}! 🎉")
-        except Exception:
-            pass
-    conn.close()
-
-@bot.event
-async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
-    try:
-        emoji = str(payload.emoji)
-    except Exception:
-        return
-    if emoji != '👍':
-        return
-    day = get_current_event_day()
-    if day is None:
-        return
-    stored = get_checkin_message(day)
-    if not stored:
-        return
-    channel_id, message_id = stored
-    if payload.message_id != message_id:
-        return
-    user_id = payload.user_id
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("DELETE FROM checkins WHERE user_id = ? AND event_day = ?", (user_id, day))
-    conn.commit()
-    conn.close()
-    # Try to DM the user as confirmation of removal
-    try:
-        user = await bot.fetch_user(user_id)
-        await user.send(f"Your check-in for Day {day} has been removed.")
-    except Exception:
-        pass
-
 # Error handler for missing permissions
 @setstartdate.error
 @dailydraw.error
 @finaldraw.error
 @eligible.error
-@resetgiveaway.error
-@postcheckin.error
 async def admin_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message(
