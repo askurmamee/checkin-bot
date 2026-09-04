@@ -90,13 +90,13 @@ def set_start_date(date_str):
     c.execute("SELECT value FROM settings WHERE key = 'start_date'")
     row = c.fetchone()
     reset_checkins = bool(row and row["value"] != date_str)
-    if reset_checkins:
-        c.execute("DELETE FROM checkins")
-    c.execute(
-        "INSERT OR REPLACE INTO settings (key, value) VALUES ('start_date', ?)",
-        (date_str,),
-    )
-    conn.commit()
+    with conn:
+        if reset_checkins:
+            c.execute("DELETE FROM checkins")
+        c.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('start_date', ?)",
+            (date_str,),
+        )
     conn.close()
     return reset_checkins
 
@@ -138,6 +138,16 @@ def admin_only():
         setattr(wrapped, "__checkin_admin_command__", True)
         return wrapped
     return decorator
+
+async def get_available_commands(interaction: discord.Interaction):
+    try:
+        if interaction.guild_id:
+            registered = await tree.fetch_commands(guild=discord.Object(id=interaction.guild_id))
+        else:
+            registered = await tree.fetch_commands()
+        return {command.name: command.description for command in registered}
+    except Exception:
+        return {command.name: command.description for command in tree.get_commands()}
 
 @bot.event
 async def on_ready():
@@ -277,23 +287,24 @@ async def leaderboard(interaction: discord.Interaction):
 
 @tree.command(name="commands", description="Show available bot commands")
 async def commands(interaction: discord.Interaction):
+    available_commands = await get_available_commands(interaction)
     user_commands = []
     admin_commands = []
     for command in tree.get_commands():
-        line = f"`/{command.name}` — {command.description}"
+        if command.name not in available_commands:
+            continue
+        line = f"`/{command.name}` — {available_commands[command.name]}"
         if getattr(command.callback, "__checkin_admin_command__", False):
             admin_commands.append(line)
         else:
             user_commands.append(line)
-
-    await interaction.response.send_message(
-        "**Checkin Bot Commands**\n"
-        "**User Commands**\n"
-        + "\n".join(user_commands)
-        + "\n\n**Admin Commands**\n"
-        + "\n".join(admin_commands),
-        ephemeral=True,
+    messages = chunk_lines(
+        user_commands + ["", "**Admin Commands**"] + admin_commands,
+        prefix="**Checkin Bot Commands**\n**User Commands**",
     )
+    await interaction.response.send_message(messages[0], ephemeral=True)
+    for message in messages[1:]:
+        await interaction.followup.send(message, ephemeral=True)
 
 @tree.command(name="setstartdate", description="ADMIN: Set the event start date (YYYY-MM-DD)")
 @app_commands.describe(date="Start date in YYYY-MM-DD format (example: 2026-09-05")
