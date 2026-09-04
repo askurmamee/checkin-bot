@@ -30,7 +30,6 @@ intents.members = True
 
 class CheckinBot(commands.Bot):
     async def setup_hook(self):
-        init_db()
         print("Startup: beginning slash-command sync")
 
         guild_id = None
@@ -57,6 +56,7 @@ class CheckinBot(commands.Bot):
                 print(f"Startup: synced {len(synced)} commands (target=global)")
         except Exception as e:
             print(f"Startup: command sync failed: {e}")
+            raise
 
 bot = CheckinBot(command_prefix="!", intents=intents)
 tree = bot.tree
@@ -137,6 +137,7 @@ def get_current_event_day():
 
 @bot.event
 async def on_ready():
+    init_db()
     print(f"Startup: bot logged in and ready as {bot.user}")
     print(f"Using database at: {os.path.abspath(DB_PATH)}")
     
