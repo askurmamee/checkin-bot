@@ -93,6 +93,10 @@ def init_db():
                 )
             c.execute("DROP TABLE checkins")
             c.execute("ALTER TABLE checkins_new RENAME TO checkins")
+        c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_checkins_event_day_user
+        ON checkins (event_start, event_day, user_id)
+        """)
     conn.close()
 
 def get_start_date():
@@ -385,10 +389,14 @@ async def leaderboard(interaction: discord.Interaction):
         )
         return
 
+    member_names = (
+        {member.id: member.display_name for member in interaction.guild.members}
+        if interaction.guild
+        else {}
+    )
     lines = []
     for index, row in enumerate(rows, start=1):
-        member = interaction.guild.get_member(row["user_id"]) if interaction.guild else None
-        display_name = member.display_name if member else f"User {row['user_id']}"
+        display_name = member_names.get(row["user_id"], f"User {row['user_id']}")
         lines.append(
             f"{index}. {display_name} (<@{row['user_id']}>) — **{row['cnt']}/7**"
         )
@@ -414,17 +422,22 @@ async def commands(interaction: discord.Interaction):
         else:
             user_commands.append(line)
 
-    lines = user_commands[:]
+    user_messages = chunk_lines(
+        user_commands,
+        prefix="**Checkin Bot Commands**\n**User Commands**",
+    )
     has_admin_perms = bool(
         interaction.guild
         and getattr(getattr(interaction.user, "guild_permissions", None), "administrator", False)
     )
-    if has_admin_perms and admin_commands:
-        lines.extend(["", "**Admin Commands**", *admin_commands])
+    admin_messages = (
+        chunk_lines(admin_commands, prefix="**Admin Commands**")
+        if has_admin_perms and admin_commands
+        else []
+    )
 
-    messages = chunk_lines(lines, prefix="**Checkin Bot Commands**\n**User Commands**")
-    await interaction.response.send_message(messages[0], ephemeral=True)
-    for message in messages[1:]:
+    await interaction.response.send_message(user_messages[0], ephemeral=True)
+    for message in user_messages[1:] + admin_messages:
         await interaction.followup.send(message, ephemeral=True)
 
 @tree.command(name="setstartdate", description="ADMIN: Set the event start date (YYYY-MM-DD)")
