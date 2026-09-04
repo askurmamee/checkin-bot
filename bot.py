@@ -318,7 +318,7 @@ class CheckInBot(commands.Bot):
             midnight_post_task.start()
 
     def validate_expected_commands(self):
-        local_names = sorted(command.name for command in self.tree.get_commands())
+        local_names = sorted(command.name for command in self.tree.get_commands(guild=None))
         expected_names = sorted(EXPECTED_COMMAND_NAMES)
         if local_names != expected_names:
             raise RuntimeError(
