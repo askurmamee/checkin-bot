@@ -124,7 +124,7 @@ PRIMARY KEY (date)
 - `DB_PATH` (optional, default: `checkins.db`) — Path to SQLite database
   - On Railway with volume: use `/data/checkins.db`
   - Locally: use relative path like `checkins.db`
-- `CHECKIN_CHANNEL_ID` (optional) — Preferred channel for the midnight auto-post
+- `CHECKIN_CHANNEL_ID` (optional) — Default channel for the midnight auto-post until the bot saves a channel from `/postdailycheckin`
 - `DISCORD_GUILD_ID` (optional) — Guild ID to force an immediate guild sync in addition to the global sync
 
 ### Bot Permissions Required
@@ -159,7 +159,7 @@ Each command opens its own connection to the database.
 
 ### Event Handling
 
-The bot uses Discord slash commands (`app_commands`) for a modern user interface. On startup it validates that all 11 commands are loaded, syncs a configured guild (or a single connected guild) first for immediate availability when possible, and then syncs globally.
+The bot uses Discord slash commands (`app_commands`) for a modern user interface. On startup it validates that all 11 commands are loaded, refreshes the selected guild scope with those 11 commands when immediate guild sync is possible, and then syncs the global command set.
 
 ## Troubleshooting
 

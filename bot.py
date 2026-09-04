@@ -312,7 +312,7 @@ class CheckInBot(commands.Bot):
 
     async def setup_hook(self):
         init_db()
-        if CONFIGURED_CHANNEL_ID:
+        if CONFIGURED_CHANNEL_ID and not get_setting("checkin_channel_id"):
             set_checkin_channel_id(CONFIGURED_CHANNEL_ID)
         if not midnight_post_task.is_running():
             midnight_post_task.start()
@@ -346,6 +346,7 @@ class CheckInBot(commands.Bot):
         self.guild_sync_counts = {}
         for guild_id in guild_ids:
             guild = discord.Object(id=guild_id)
+            self.tree.clear_commands(guild=guild)
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
             self.guild_sync_counts[guild_id] = len(synced)
