@@ -167,33 +167,48 @@ def get_total_checkins_for_day(day):
     conn.close()
     return count
 
-def chunk_lines(lines, prefix="", max_length=1900):
-    def format_chunk(chunk_lines):
+def chunk_lines(lines, prefix="", max_length=1900, repeat_prefix=False):
+    def format_chunk(chunk_lines, include_prefix):
         body = "\n".join(chunk_lines)
-        if prefix and body:
+        if include_prefix and prefix and body:
             return f"{prefix}\n{body}"
-        if prefix:
+        if include_prefix and prefix:
             return prefix
         return body
 
-    available = max_length - len(prefix) - (1 if prefix else 0)
-    if available <= 0:
-        raise ValueError("Prefix is too long for the configured max_length.")
-
     chunks = []
     current_lines = []
+    include_prefix = bool(prefix)
     for line in lines:
-        segments = [line[i:i + available] for i in range(0, len(line), available)] or [""]
-        for segment in segments:
+        remaining = line
+        while True:
+            available = max_length - (
+                len(prefix) + 1 if include_prefix and prefix else 0
+            )
+            if available <= 0:
+                raise ValueError("Prefix is too long for the configured max_length.")
+
+            segment = remaining[:available]
+            rest = remaining[available:]
             candidate_lines = current_lines + [segment]
-            candidate = format_chunk(candidate_lines)
+            candidate = format_chunk(candidate_lines, include_prefix)
             if len(candidate) > max_length and current_lines:
-                chunks.append(format_chunk(current_lines))
-                current_lines = [segment]
-            else:
-                current_lines = candidate_lines
-    if current_lines or prefix:
-        chunks.append(format_chunk(current_lines))
+                chunks.append(format_chunk(current_lines, include_prefix))
+                current_lines = []
+                include_prefix = repeat_prefix and bool(prefix)
+                continue
+
+            current_lines = candidate_lines
+            if not rest:
+                break
+
+            chunks.append(format_chunk(current_lines, include_prefix))
+            current_lines = []
+            include_prefix = repeat_prefix and bool(prefix)
+            remaining = rest
+
+    if current_lines or (prefix and not chunks):
+        chunks.append(format_chunk(current_lines, include_prefix))
     return chunks
 
 def admin_only():
@@ -203,7 +218,7 @@ def admin_only():
         return wrapped
     return decorator
 
-async def get_available_commands(interaction: discord.Interaction):
+async def get_available_commands():
     try:
         sync_target = get_sync_target()
         if sync_target:
@@ -381,7 +396,7 @@ async def leaderboard(interaction: discord.Interaction):
 
 @tree.command(name="commands", description="Show available bot commands")
 async def commands(interaction: discord.Interaction):
-    available_commands = await get_available_commands(interaction)
+    available_commands = await get_available_commands()
     local_commands = {
         command.name: command for command in tree.get_commands()
     }
