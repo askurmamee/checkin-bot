@@ -43,6 +43,7 @@ A Discord bot for managing check-in events with daily and final draws. Built wit
    Then edit `.env` and add your Discord bot token:
    ```
    DISCORD_TOKEN=your_bot_token_here
+   DISCORD_GUILD_ID=123456789012345678
    DB_PATH=checkins.db
    ```
 
@@ -58,6 +59,7 @@ A Discord bot for managing check-in events with daily and final draws. Built wit
 3. Connect your GitHub repository
 4. Add environment variables in Railway dashboard:
    - `DISCORD_TOKEN` — your Discord bot token
+   - `DISCORD_GUILD_ID` — your Discord server ID for fast guild command sync (recommended)
    - `DB_PATH` — set to `/data/checkins.db` (requires volume mount)
 5. Attach a volume to `/data` for persistent database storage
 6. Deploy!
@@ -104,6 +106,9 @@ Currently stores:
 ### Environment Variables
 
 - `DISCORD_TOKEN` (required) — Your Discord bot token
+- `DISCORD_GUILD_ID` (optional) — Guild/server ID for fast slash-command sync in one server
+  - Recommended for single-server deployments and testing
+  - If omitted, commands sync globally (can take several minutes to propagate)
 - `DB_PATH` (optional, default: `checkins.db`) — Path to SQLite database
   - On Railway with volume: use `/data/checkins.db`
   - Locally: use relative path like `checkins.db`
@@ -115,6 +120,10 @@ Ensure the bot has these permissions in any channel where it operates:
 - View Channel
 - Send Messages
 - Read Message History
+
+When inviting the bot from Discord Developer Portal, include both OAuth scopes:
+- `bot`
+- `applications.commands`
 
 ### Timezone
 
@@ -139,7 +148,7 @@ Each command opens its own connection to the database.
 
 ### Event Handling
 
-The bot uses Discord's slash commands (app_commands) for a modern user interface. All commands are automatically synced to the server on bot startup.
+The bot uses Discord's slash commands (app_commands) for a modern user interface. On startup, it syncs commands to `DISCORD_GUILD_ID` when set (fast), otherwise it performs global sync.
 
 ## Troubleshooting
 
@@ -148,6 +157,8 @@ The bot uses Discord's slash commands (app_commands) for a modern user interface
 | "DISCORD_TOKEN is not set" | Add your bot token to `.env` (local) or Railway Variables tab |
 | "Event is not active" | Use `/setstartdate YYYY-MM-DD` to set the event start date |
 | "Database is locked" errors | The bot uses WAL mode to mitigate this; if persistent, restart the bot |
+| Slash commands missing after startup | Confirm invite used both `bot` + `applications.commands`, set `DISCORD_GUILD_ID` for fast guild sync, and check startup logs for sync target/count |
+| Global slash-command updates appear delayed | This is expected: global command propagation can take several minutes; use `DISCORD_GUILD_ID` for near-immediate guild sync |
 | Bot doesn't respond to commands | Check bot has "Send Messages" permission and commands are synced (check console on startup) |
 | Timezone seems wrong | Edit line 15 in `bot.py` to change the timezone |
 

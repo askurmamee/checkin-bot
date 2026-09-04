@@ -12,6 +12,7 @@ import random
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN") # ← set this in Railway's Variables tab
+DISCORD_GUILD_ID = os.getenv("DISCORD_GUILD_ID")
 TZ = ZoneInfo("Asia/Shanghai") # UTC+8
 # Persistent DB path. Set DB_PATH=/data/checkins.db in Railway once you've
 # attached a volume mounted at /data. Falls back to a local file so this
@@ -26,7 +27,38 @@ if not TOKEN:
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
-bot = commands.Bot(command_prefix="!", intents=intents)
+
+class CheckinBot(commands.Bot):
+    async def setup_hook(self):
+        init_db()
+        print("Startup: beginning slash-command sync")
+
+        guild_id = None
+        if DISCORD_GUILD_ID:
+            try:
+                guild_id = int(DISCORD_GUILD_ID)
+            except ValueError:
+                print(
+                    f"Startup: DISCORD_GUILD_ID='{DISCORD_GUILD_ID}' is invalid; "
+                    "falling back to global sync."
+                )
+
+        try:
+            if guild_id is not None:
+                print(f"Startup: syncing commands to guild {guild_id}")
+                synced = await self.tree.sync(guild=discord.Object(id=guild_id))
+                print(f"Startup: synced {len(synced)} commands (target=guild)")
+            else:
+                print(
+                    "Startup: no DISCORD_GUILD_ID set; syncing commands globally "
+                    "(may take time to propagate)."
+                )
+                synced = await self.tree.sync()
+                print(f"Startup: synced {len(synced)} commands (target=global)")
+        except Exception as e:
+            print(f"Startup: command sync failed: {e}")
+
+bot = CheckinBot(command_prefix="!", intents=intents)
 tree = bot.tree
 
 # Global variable to store the checkin channel and message
@@ -105,14 +137,8 @@ def get_current_event_day():
 
 @bot.event
 async def on_ready():
-    init_db()
-    print(f"Bot is online as {bot.user}")
+    print(f"Startup: bot logged in and ready as {bot.user}")
     print(f"Using database at: {os.path.abspath(DB_PATH)}")
-    try:
-        synced = await tree.sync()
-        print(f"Synced {len(synced)} commands")
-    except Exception as e:
-        print(e)
     
     # Start the midnight auto-post task
     if not midnight_post_task.is_running():
