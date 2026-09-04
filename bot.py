@@ -337,10 +337,6 @@ class CheckInBot(commands.Bot):
 
     async def sync_registered_commands(self):
         self.validate_expected_commands()
-        global_commands = await self.tree.sync()
-        self.global_sync_count = len(global_commands)
-        self.validate_synced_commands(global_commands, "global scope")
-
         guild_ids = []
         if TARGET_GUILD_ID:
             guild_ids = [TARGET_GUILD_ID]
@@ -355,6 +351,9 @@ class CheckInBot(commands.Bot):
             self.guild_sync_counts[guild_id] = len(synced)
             self.validate_synced_commands(synced, f"guild {guild_id}")
 
+        global_commands = await self.tree.sync()
+        self.global_sync_count = len(global_commands)
+        self.validate_synced_commands(global_commands, "global scope")
         self.commands_synced = True
 
 
