@@ -389,14 +389,10 @@ async def leaderboard(interaction: discord.Interaction):
         )
         return
 
-    member_names = (
-        {member.id: member.display_name for member in interaction.guild.members}
-        if interaction.guild
-        else {}
-    )
     lines = []
     for index, row in enumerate(rows, start=1):
-        display_name = member_names.get(row["user_id"], f"User {row['user_id']}")
+        member = interaction.guild.get_member(row["user_id"]) if interaction.guild else None
+        display_name = member.display_name if member else f"User {row['user_id']}"
         lines.append(
             f"{index}. {display_name} (<@{row['user_id']}>) — **{row['cnt']}/7**"
         )
@@ -611,12 +607,8 @@ async def todaycheckins(interaction: discord.Interaction):
     for message in messages[1:]:
         await interaction.followup.send(message, ephemeral=True)
 
-# Error handler for missing permissions
-@setstartdate.error
-@dailydraw.error
-@finaldraw.error
-@eligible.error
-@todaycheckins.error
+# Error handler for app command permissions
+@tree.error
 async def admin_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         if interaction.response.is_done():
