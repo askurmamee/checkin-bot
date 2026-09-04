@@ -146,17 +146,32 @@ def get_total_checkins_for_day(day):
     return count
 
 def chunk_lines(lines, prefix="", max_length=1900):
+    def format_chunk(chunk_lines):
+        body = "\n".join(chunk_lines)
+        if prefix and body:
+            return f"{prefix}\n{body}"
+        if prefix:
+            return prefix
+        return body
+
+    available = max_length - len(prefix) - (1 if prefix else 0)
+    if available <= 0:
+        raise ValueError("Prefix is too long for the configured max_length.")
+
     chunks = []
-    current = prefix
+    current_lines = []
     for line in lines:
-        candidate = f"{current}\n{line}" if current else line
-        if len(candidate) > max_length and current:
-            chunks.append(current)
-            current = f"{prefix}\n{line}" if prefix else line
-        else:
-            current = candidate
-    if current:
-        chunks.append(current)
+        segments = [line[i:i + available] for i in range(0, len(line), available)] or [""]
+        for segment in segments:
+            candidate_lines = current_lines + [segment]
+            candidate = format_chunk(candidate_lines)
+            if len(candidate) > max_length and current_lines:
+                chunks.append(format_chunk(current_lines))
+                current_lines = [segment]
+            else:
+                current_lines = candidate_lines
+    if current_lines or prefix:
+        chunks.append(format_chunk(current_lines))
     return chunks
 
 def admin_only():
@@ -434,6 +449,12 @@ async def finaldraw(interaction: discord.Interaction):
     # which will blow past Discord's 3-second interaction deadline.
     await interaction.response.defer()
     event_start = get_event_start_key()
+    if not event_start:
+        await interaction.followup.send(
+            "No event is configured yet. Set a start date first.",
+            ephemeral=True,
+        )
+        return
     conn = get_db()
     c = conn.cursor()
     # Get users who have all 7 days
@@ -475,6 +496,12 @@ async def finaldraw(interaction: discord.Interaction):
 @admin_only()
 async def eligible(interaction: discord.Interaction):
     event_start = get_event_start_key()
+    if not event_start:
+        await interaction.response.send_message(
+            "No event is configured yet. Set a start date first.",
+            ephemeral=True,
+        )
+        return
     conn = get_db()
     c = conn.cursor()
     c.execute("""
