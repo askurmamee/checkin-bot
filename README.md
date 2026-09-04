@@ -72,11 +72,12 @@ For more details, see [Railway docs](https://docs.railway.app/guides/projects).
 - **`/progress`** — View your check-in progress (X/7 days)
 - **`/status`** — See whether the event is active, the current day, and today's total check-ins
 - **`/leaderboard`** — Show the top check-in counts
-- **`/help`** — Show the available bot commands
+- **`/commands`** — Show the available bot commands
 
 ### Admin Commands
 
 - **`/setstartdate <YYYY-MM-DD>`** — Set the event start date (requires Administrator)
+  - Setting a different start date clears the previous event's saved check-ins
 - **`/dailydraw`** — Draw 1 random winner from today's check-ins (requires Administrator)
 - **`/finaldraw`** — Draw winners for players with 7/7 check-ins (requires Administrator, minimum 14 eligible players)
 - **`/eligible`** — See how many players have completed 7/7 (requires Administrator)

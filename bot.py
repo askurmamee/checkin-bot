@@ -87,12 +87,18 @@ def get_sync_target():
 def set_start_date(date_str):
     conn = get_db()
     c = conn.cursor()
+    c.execute("SELECT value FROM settings WHERE key = 'start_date'")
+    row = c.fetchone()
+    reset_checkins = bool(row and row["value"] != date_str)
+    if reset_checkins:
+        c.execute("DELETE FROM checkins")
     c.execute(
         "INSERT OR REPLACE INTO settings (key, value) VALUES ('start_date', ?)",
         (date_str,),
     )
     conn.commit()
     conn.close()
+    return reset_checkins
 
 def get_current_event_day():
     start = get_start_date()
@@ -211,15 +217,24 @@ async def status(interaction: discord.Interaction):
 
 @tree.command(name="leaderboard", description="Show the top check-in counts")
 async def leaderboard(interaction: discord.Interaction):
+    day = get_current_event_day()
+    if day is None:
+        await interaction.response.send_message(
+            "Event is not active right now.",
+            ephemeral=True,
+        )
+        return
+
     conn = get_db()
     c = conn.cursor()
     c.execute("""
     SELECT user_id, COUNT(*) as cnt
     FROM checkins
+    WHERE event_day BETWEEN 1 AND ?
     GROUP BY user_id
     ORDER BY cnt DESC, user_id ASC
     LIMIT 10
-    """)
+    """, (day,))
     rows = c.fetchall()
     conn.close()
 
@@ -239,19 +254,23 @@ async def leaderboard(interaction: discord.Interaction):
         ephemeral=False,
     )
 
-@tree.command(name="help", description="Show available bot commands")
-async def help_command(interaction: discord.Interaction):
+@tree.command(name="commands", description="Show available bot commands")
+async def commands(interaction: discord.Interaction):
+    user_commands = []
+    admin_commands = []
+    for command in tree.get_commands():
+        line = f"`/{command.name}` — {command.description}"
+        if command.name in {"setstartdate", "dailydraw", "finaldraw", "eligible", "todaycheckins"}:
+            admin_commands.append(line)
+        else:
+            user_commands.append(line)
+
     await interaction.response.send_message(
         "**Checkin Bot Commands**\n"
-        "`/checkin` — Check in for today\n"
-        "`/progress` — See your own progress\n"
-        "`/status` — See whether the event is active and what day it is\n"
-        "`/leaderboard` — Show the top check-in counts\n"
-        "`/setstartdate` — Admin: set the event start date\n"
-        "`/dailydraw` — Admin: draw today's winner\n"
-        "`/finaldraw` — Admin: draw the final winners\n"
-        "`/eligible` — Admin: count players with 7/7\n"
-        "`/todaycheckins` — Admin: list today's check-ins",
+        "**User Commands**\n"
+        + "\n".join(user_commands)
+        + "\n\n**Admin Commands**\n"
+        + "\n".join(admin_commands),
         ephemeral=True,
     )
 
@@ -266,9 +285,12 @@ async def setstartdate(interaction: discord.Interaction, date: str):
             "Wrong format. Use YYYY-MM-DD (example: 2026-09-05)", ephemeral=True
         )
         return
-    set_start_date(date)
+    reset_checkins = set_start_date(date)
+    message = f"Event start date set to **{date}** (Day 1)."
+    if reset_checkins:
+        message += " Previous event check-ins were cleared."
     await interaction.response.send_message(
-        f" Event start date set to **{date}** (Day 1)", ephemeral=True
+        message, ephemeral=True
     )
 
 @tree.command(name="dailydraw", description="ADMIN: Draw 1 Daily Lucky Star winner")
