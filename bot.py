@@ -65,6 +65,7 @@ def init_db():
         c.execute("SELECT value FROM settings WHERE key = 'start_date'")
         row = c.fetchone()
         default_event_start = row["value"] if row and row["value"] else "legacy"
+        c.execute("DROP TABLE IF EXISTS checkins_new")
         c.execute("""
         CREATE TABLE checkins_new (
         user_id INTEGER,
@@ -383,13 +384,15 @@ async def leaderboard(interaction: discord.Interaction):
 @tree.command(name="commands", description="Show available bot commands")
 async def commands(interaction: discord.Interaction):
     available_commands = await get_available_commands(interaction)
+    local_commands = {
+        command.name: command for command in tree.get_commands()
+    }
     user_commands = []
     admin_commands = []
-    for command in tree.get_commands():
-        if command.name not in available_commands:
-            continue
-        line = f"`/{command.name}` — {available_commands[command.name]}"
-        if getattr(command.callback, "__checkin_admin_command__", False):
+    for command_name, description in available_commands.items():
+        local_command = local_commands.get(command_name)
+        line = f"`/{command_name}` — {description}"
+        if local_command and getattr(local_command.callback, "__checkin_admin_command__", False):
             admin_commands.append(line)
         else:
             user_commands.append(line)
@@ -557,7 +560,7 @@ async def todaycheckins(interaction: discord.Interaction):
         SELECT user_id
         FROM checkins
         WHERE event_day = ? AND event_start = ?
-        ORDER BY rowid
+        ORDER BY user_id
         """,
         (day, event_start),
     )
