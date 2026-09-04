@@ -12,16 +12,12 @@ import random
 
 load_dotenv()
 TOKEN = os.getenv("DISCORD_TOKEN") # ← set this in Railway's Variables tab
+GUILD_ID = os.getenv("DISCORD_GUILD_ID")
 TZ = ZoneInfo("Asia/Shanghai") # UTC+8
 # Persistent DB path. Set DB_PATH=/data/checkins.db in Railway once you've
 # attached a volume mounted at /data. Falls back to a local file so this
 # still runs fine on your own machine without a volume.
 DB_PATH = os.getenv("DB_PATH", "checkins.db")
-if not TOKEN:
-    sys.exit(
-        "ERROR: DISCORD_TOKEN is not set. "
-        "Add it in Railway → your service → Variables (or a local .env file)."
-    )
 # ======================================================
 intents = discord.Intents.default()
 intents.message_content = True
@@ -69,8 +65,24 @@ def get_start_date():
     row = c.fetchone()
     conn.close()
     if row:
-        return datetime.strptime(row["value"], "%Y-%m-%d").date()
+        try:
+            return datetime.strptime(row["value"], "%Y-%m-%d").date()
+        except ValueError:
+            print(
+                "Invalid start_date found in settings table. "
+                "Reset it with /setstartdate YYYY-MM-DD."
+            )
+            return None
     return None
+
+def get_sync_target():
+    if not GUILD_ID:
+        return None
+    try:
+        return discord.Object(id=int(GUILD_ID))
+    except ValueError:
+        print(f"Invalid DISCORD_GUILD_ID: {GUILD_ID!r}. Falling back to global sync.")
+        return None
 
 def set_start_date(date_str):
     conn = get_db()
@@ -98,8 +110,13 @@ async def on_ready():
     print(f"Bot is online as {bot.user}")
     print(f"Using database at: {os.path.abspath(DB_PATH)}")
     try:
-        synced = await tree.sync()
-        print(f"Synced {len(synced)} commands")
+        sync_target = get_sync_target()
+        if sync_target:
+            synced = await tree.sync(guild=sync_target)
+            print(f"Synced {len(synced)} commands to guild {sync_target.id}")
+        else:
+            synced = await tree.sync()
+            print(f"Synced {len(synced)} global commands")
     except Exception as e:
         print(e)
 
@@ -270,11 +287,26 @@ async def eligible(interaction: discord.Interaction):
 @eligible.error
 async def admin_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
-        await interaction.response.send_message(
-            "You need Administrator permission to use this command.",
-            ephemeral=True,
-        )
+        if interaction.response.is_done():
+            await interaction.followup.send(
+                "You need Administrator permission to use this command.",
+                ephemeral=True,
+            )
+        else:
+            await interaction.response.send_message(
+                "You need Administrator permission to use this command.",
+                ephemeral=True,
+            )
     else:
         raise error
 
-bot.run(TOKEN)
+def main():
+    if not TOKEN:
+        sys.exit(
+            "ERROR: DISCORD_TOKEN is not set. "
+            "Add it in Railway → your service → Variables (or a local .env file)."
+        )
+    bot.run(TOKEN)
+
+if __name__ == "__main__":
+    main()
