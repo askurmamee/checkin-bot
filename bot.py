@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 import discord
 from discord.ext import commands
 from discord import app_commands
+from discord.utils import escape_markdown, escape_mentions
 import sqlite3
 from datetime import datetime
 import random
@@ -393,8 +394,9 @@ async def leaderboard(interaction: discord.Interaction):
     for index, row in enumerate(rows, start=1):
         member = interaction.guild.get_member(row["user_id"]) if interaction.guild else None
         display_name = member.display_name if member else f"User {row['user_id']}"
+        safe_name = escape_mentions(escape_markdown(display_name))
         lines.append(
-            f"{index}. {display_name} (<@{row['user_id']}>) — **{row['cnt']}/7**"
+            f"{index}. {safe_name} (<@{row['user_id']}>) — **{row['cnt']}/7**"
         )
     await interaction.response.send_message(
         "**Check-in Leaderboard**\n" + "\n".join(lines),
@@ -610,7 +612,11 @@ async def todaycheckins(interaction: discord.Interaction):
 # Error handler for app command permissions
 @tree.error
 async def admin_error(interaction: discord.Interaction, error):
-    if isinstance(error, app_commands.MissingPermissions):
+    command = getattr(interaction, "command", None)
+    is_admin_command = bool(
+        command and getattr(command.callback, "__checkin_admin_command__", False)
+    )
+    if is_admin_command and isinstance(error, app_commands.MissingPermissions):
         if interaction.response.is_done():
             await interaction.followup.send(
                 "You need Administrator permission to use this command.",
