@@ -70,6 +70,9 @@ For more details, see [Railway docs](https://docs.railway.app/guides/projects).
 
 - **`/checkin`** — Check in for the current day
 - **`/progress`** — View your check-in progress (X/7 days)
+- **`/status`** — See whether the event is active, the current day, and today's total check-ins
+- **`/leaderboard`** — Show the top check-in counts
+- **`/help`** — Show the available bot commands
 
 ### Admin Commands
 
@@ -77,6 +80,7 @@ For more details, see [Railway docs](https://docs.railway.app/guides/projects).
 - **`/dailydraw`** — Draw 1 random winner from today's check-ins (requires Administrator)
 - **`/finaldraw`** — Draw winners for players with 7/7 check-ins (requires Administrator, minimum 14 eligible players)
 - **`/eligible`** — See how many players have completed 7/7 (requires Administrator)
+- **`/todaycheckins`** — List who has checked in today (requires Administrator)
 
 ## Database
 

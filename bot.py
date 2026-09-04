@@ -104,6 +104,14 @@ def get_current_event_day():
         return day_num
     return None
 
+def get_total_checkins_for_day(day):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) as cnt FROM checkins WHERE event_day = ?", (day,))
+    count = c.fetchone()["cnt"]
+    conn.close()
+    return count
+
 @bot.event
 async def on_ready():
     init_db()
@@ -172,6 +180,78 @@ async def progress(interaction: discord.Interaction):
     days_str = ", ".join(str(d) for d in days) if days else "None"
     await interaction.response.send_message(
         f"**Your progress: {progress}/7**\nDays completed: {days_str}",
+        ephemeral=True,
+    )
+
+@tree.command(name="status", description="See the current event status")
+async def status(interaction: discord.Interaction):
+    start = get_start_date()
+    day = get_current_event_day()
+    if not start:
+        await interaction.response.send_message(
+            "No event is configured yet. Ask an admin to run `/setstartdate YYYY-MM-DD`.",
+            ephemeral=True,
+        )
+        return
+
+    if day is None:
+        await interaction.response.send_message(
+            f"Event start date: **{start.isoformat()}**\nThe 7-day event is not active right now.",
+            ephemeral=True,
+        )
+        return
+
+    today_count = get_total_checkins_for_day(day)
+    await interaction.response.send_message(
+        f"Event start date: **{start.isoformat()}**\n"
+        f"Current day: **Day {day}/7**\n"
+        f"Today's check-ins: **{today_count}**",
+        ephemeral=True,
+    )
+
+@tree.command(name="leaderboard", description="Show the top check-in counts")
+async def leaderboard(interaction: discord.Interaction):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""
+    SELECT user_id, COUNT(*) as cnt
+    FROM checkins
+    GROUP BY user_id
+    ORDER BY cnt DESC, user_id ASC
+    LIMIT 10
+    """)
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        await interaction.response.send_message(
+            "No check-ins have been recorded yet.",
+            ephemeral=True,
+        )
+        return
+
+    lines = [
+        f"{index}. <@{row['user_id']}> — **{row['cnt']}/7**"
+        for index, row in enumerate(rows, start=1)
+    ]
+    await interaction.response.send_message(
+        "**Check-in Leaderboard**\n" + "\n".join(lines),
+        ephemeral=False,
+    )
+
+@tree.command(name="help", description="Show available bot commands")
+async def help_command(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        "**Checkin Bot Commands**\n"
+        "`/checkin` — Check in for today\n"
+        "`/progress` — See your own progress\n"
+        "`/status` — See whether the event is active and what day it is\n"
+        "`/leaderboard` — Show the top check-in counts\n"
+        "`/setstartdate` — Admin: set the event start date\n"
+        "`/dailydraw` — Admin: draw today's winner\n"
+        "`/finaldraw` — Admin: draw the final winners\n"
+        "`/eligible` — Admin: count players with 7/7\n"
+        "`/todaycheckins` — Admin: list today's check-ins",
         ephemeral=True,
     )
 
@@ -280,11 +360,43 @@ async def eligible(interaction: discord.Interaction):
         f"Players with 7/7: **{count}**", ephemeral=True
     )
 
+@tree.command(name="todaycheckins", description="ADMIN: List today's checked-in players")
+@app_commands.checks.has_permissions(administrator=True)
+async def todaycheckins(interaction: discord.Interaction):
+    day = get_current_event_day()
+    if day is None:
+        await interaction.response.send_message(
+            "Event is not active today.", ephemeral=True
+        )
+        return
+
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        "SELECT user_id FROM checkins WHERE event_day = ? ORDER BY user_id",
+        (day,),
+    )
+    users = [f"<@{row['user_id']}>" for row in c.fetchall()]
+    conn.close()
+
+    if not users:
+        await interaction.response.send_message(
+            f"No one has checked in for Day {day} yet.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.send_message(
+        f"**Day {day} check-ins ({len(users)})**\n" + "\n".join(users),
+        ephemeral=True,
+    )
+
 # Error handler for missing permissions
 @setstartdate.error
 @dailydraw.error
 @finaldraw.error
 @eligible.error
+@todaycheckins.error
 async def admin_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         if interaction.response.is_done():
