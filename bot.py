@@ -4,10 +4,10 @@ import sys
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import sqlite3
-from datetime import datetime
+from datetime import datetime, time
 import random
 
 load_dotenv()
@@ -28,6 +28,10 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
+
+# Global variable to store the checkin channel and message
+CHECKIN_CHANNEL_ID = None
+CHECKIN_MESSAGE_ID = None
 
 def get_db():
     # Use a connection timeout and WAL mode to reduce "database is locked"
@@ -57,6 +61,13 @@ def init_db():
     CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
+    )
+    """)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS daily_messages (
+    date TEXT PRIMARY KEY,
+    channel_id TEXT,
+    message_id TEXT
     )
     """)
     conn.commit()
@@ -102,7 +113,109 @@ async def on_ready():
         print(f"Synced {len(synced)} commands")
     except Exception as e:
         print(e)
+    
+    # Start the midnight auto-post task
+    if not midnight_post_task.is_running():
+        midnight_post_task.start()
 
+# ====================== TASKS ======================
+@tasks.loop(minutes=1)
+async def midnight_post_task():
+    """Check every minute if it's midnight and post a new checkin message."""
+    now = datetime.now(TZ)
+    
+    # Check if it's exactly midnight (00:00)
+    if now.hour == 0 and now.minute == 0:
+        # Get the default checkin channel
+        # For now, we'll need the channel ID to be set
+        # In production, you'd want to store this in settings
+        print("Midnight reached! Posting daily checkin message...")
+        
+        # Get all channels to find the first available guild
+        for guild in bot.guilds:
+            # Find a channel or use the first available
+            for channel in guild.text_channels:
+                if channel.permissions_for(guild.me).send_messages:
+                    await post_daily_checkin(channel)
+                    break
+        
+        # Wait until next minute to avoid duplicate posts
+        import asyncio
+        await asyncio.sleep(60)
+
+async def post_daily_checkin(channel):
+    """Post the daily checkin message with thumbs up reaction."""
+    today = datetime.now(TZ).strftime("%Y-%m-%d")
+    message_text = f"**Daily Check-in — {today}**\n\nReact with 👍 to check in for today!"
+    
+    try:
+        message = await channel.send(message_text)
+        await message.add_reaction("👍")
+        
+        # Save to database
+        conn = get_db()
+        c = conn.cursor()
+        c.execute(
+            "INSERT OR REPLACE INTO daily_messages (date, channel_id, message_id) VALUES (?, ?, ?)",
+            (today, str(channel.id), str(message.id))
+        )
+        conn.commit()
+        conn.close()
+        
+        print(f"Posted daily checkin message: {message.id}")
+    except Exception as e:
+        print(f"Error posting daily checkin: {e}")
+
+@bot.event
+async def on_reaction_add(reaction, user):
+    """Handle thumbs up reaction for check-ins."""
+    # Ignore bot reactions
+    if user.bot:
+        return
+    
+    # Only listen for thumbs up reactions
+    if str(reaction.emoji) != "👍":
+        return
+    
+    # Check if this is a daily checkin message
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT date FROM daily_messages WHERE message_id = ?", (str(reaction.message.id),))
+    row = c.fetchone()
+    conn.close()
+    
+    if not row:
+        return
+    
+    # Record the check-in
+    day = get_current_event_day()
+    if day is None:
+        return
+    
+    user_id = user.id
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Check if already checked in today
+    c.execute(
+        "SELECT 1 FROM checkins WHERE user_id = ? AND event_day = ?",
+        (user_id, day),
+    )
+    if c.fetchone():
+        conn.close()
+        return  # Already checked in
+    
+    # Save check-in
+    c.execute(
+        "INSERT INTO checkins (user_id, event_day) VALUES (?, ?)",
+        (user_id, day)
+    )
+    conn.commit()
+    conn.close()
+    
+    print(f"User {user.name} checked in via reaction")
+
+# ====================== USER COMMANDS ======================
 @tree.command(name="checkin", description="Check in for today")
 async def checkin(interaction: discord.Interaction):
     day = get_current_event_day()
@@ -158,6 +271,7 @@ async def progress(interaction: discord.Interaction):
         ephemeral=True,
     )
 
+# ====================== ADMIN COMMANDS ======================
 @tree.command(name="setstartdate", description="ADMIN: Set the event start date (YYYY-MM-DD)")
 @app_commands.describe(date="Start date in YYYY-MM-DD format (example: 2026-09-05")
 @app_commands.checks.has_permissions(administrator=True)
@@ -263,11 +377,101 @@ async def eligible(interaction: discord.Interaction):
         f"Players with 7/7: **{count}**", ephemeral=True
     )
 
+@tree.command(name="totalcount", description="ADMIN: Show total check-ins across all members")
+@app_commands.checks.has_permissions(administrator=True)
+async def totalcount(interaction: discord.Interaction):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) as cnt FROM checkins")
+    total = c.fetchone()["cnt"]
+    conn.close()
+    await interaction.response.send_message(
+        f"**Total check-ins: {total}**", ephemeral=True
+    )
+
+@tree.command(name="resetmembers", description="ADMIN: Reset all members' check-in counts to 0")
+@app_commands.checks.has_permissions(administrator=True)
+async def resetmembers(interaction: discord.Interaction):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("DELETE FROM checkins")
+    conn.commit()
+    conn.close()
+    await interaction.response.send_message(
+        "✅ All members' check-in counts have been reset to 0!", ephemeral=True
+    )
+
+@tree.command(name="masterreset", description="ADMIN: Complete event reset (clear all data)")
+@app_commands.checks.has_permissions(administrator=True)
+async def masterreset(interaction: discord.Interaction):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("DELETE FROM checkins")
+    c.execute("DELETE FROM settings")
+    c.execute("DELETE FROM daily_messages")
+    conn.commit()
+    conn.close()
+    await interaction.response.send_message(
+        "🔄 **MASTER RESET COMPLETE** - All data cleared, event ready to restart!", ephemeral=True
+    )
+
+@tree.command(name="editmember", description="ADMIN: Edit a member's total check-in count")
+@app_commands.describe(
+    user="The user to edit",
+    value="Value to add or subtract (e.g., +2 or -1)"
+)
+@app_commands.checks.has_permissions(administrator=True)
+async def editmember(interaction: discord.Interaction, user: discord.User, value: str):
+    try:
+        change = int(value)
+    except ValueError:
+        await interaction.response.send_message(
+            "Invalid value! Use a number like +2 or -1", ephemeral=True
+        )
+        return
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Get current count
+    c.execute("SELECT COUNT(*) as cnt FROM checkins WHERE user_id = ?", (user.id,))
+    current = c.fetchone()["cnt"]
+    new_count = max(0, current + change)  # Don't go below 0
+    
+    # Clear existing records
+    c.execute("DELETE FROM checkins WHERE user_id = ?", (user.id,))
+    
+    # Re-add with new count (assign to days 1-7 or however many)
+    for day in range(1, new_count + 1):
+        if day <= 7:  # Cap at 7
+            c.execute(
+                "INSERT INTO checkins (user_id, event_day) VALUES (?, ?)",
+                (user.id, day)
+            )
+    
+    conn.commit()
+    conn.close()
+    
+    await interaction.response.send_message(
+        f"✅ Updated {user.mention}'s check-ins: **{current}** → **{new_count}**", ephemeral=True
+    )
+
+@tree.command(name="postdailycheckin", description="ADMIN: Manually post today's check-in message")
+@app_commands.checks.has_permissions(administrator=True)
+async def postdailycheckin(interaction: discord.Interaction):
+    await post_daily_checkin(interaction.channel)
+    await interaction.response.send_message("✅ Daily check-in message posted!", ephemeral=True)
+
 # Error handler for missing permissions
 @setstartdate.error
 @dailydraw.error
 @finaldraw.error
 @eligible.error
+@totalcount.error
+@resetmembers.error
+@masterreset.error
+@editmember.error
+@postdailycheckin.error
 async def admin_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message(
