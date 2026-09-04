@@ -451,6 +451,23 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
         return
     if str(payload.emoji) != "👍":
         return
+    if payload.guild_id is None:
+        return
+
+    member = payload.member
+    if member is None:
+        guild = bot.get_guild(payload.guild_id)
+        if guild is None:
+            return
+        member = guild.get_member(payload.user_id)
+        if member is None:
+            try:
+                member = await guild.fetch_member(payload.user_id)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                return
+
+    if member.bot:
+        return
 
     record = get_daily_message_for_message(payload.message_id)
     if not record:
@@ -464,11 +481,7 @@ async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
     if not record_checkin(payload.user_id, event_day):
         return
 
-    user_name = (
-        payload.member.display_name
-        if payload.member is not None
-        else str(payload.user_id)
-    )
+    user_name = member.display_name
     print(f"Recorded 👍 reaction check-in for {user_name} on Day {event_day}")
 
 

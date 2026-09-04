@@ -108,6 +108,14 @@ Currently stores:
 - `start_date` — The event start date in YYYY-MM-DD format
 - `checkin_channel_id` — The preferred channel for manual and midnight daily posts
 
+### `daily_messages`
+```
+date (TEXT)        — Message date in YYYY-MM-DD format
+channel_id (TEXT)  — Channel where the daily post was sent
+message_id (TEXT)  — Discord message ID for the tracked 👍 check-in post
+PRIMARY KEY (date)
+```
+
 ## Configuration
 
 ### Environment Variables
