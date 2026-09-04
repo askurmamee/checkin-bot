@@ -125,7 +125,7 @@ def chunk_lines(lines, prefix="", max_length=1900):
         candidate = f"{current}\n{line}" if current else line
         if len(candidate) > max_length and current:
             chunks.append(current)
-            current = line
+            current = f"{prefix}\n{line}" if prefix else line
         else:
             current = candidate
     if current:
