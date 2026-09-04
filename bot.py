@@ -619,14 +619,8 @@ async def todaycheckins(interaction: discord.Interaction):
     for message in messages[1:]:
         await interaction.followup.send(message, ephemeral=True)
 
-# Error handler for app command permissions
-@tree.error
 async def admin_error(interaction: discord.Interaction, error):
-    command = getattr(interaction, "command", None)
-    is_admin_command = bool(
-        command and getattr(command.callback, "__checkin_admin_command__", False)
-    )
-    if is_admin_command and isinstance(error, app_commands.MissingPermissions):
+    if isinstance(error, app_commands.MissingPermissions):
         if interaction.response.is_done():
             await interaction.followup.send(
                 "You need Administrator permission to use this command.",
@@ -639,6 +633,9 @@ async def admin_error(interaction: discord.Interaction, error):
             )
     else:
         raise error
+
+for command in (setstartdate, dailydraw, finaldraw, eligible, todaycheckins):
+    command.error(admin_error)
 
 def main():
     if not TOKEN:
