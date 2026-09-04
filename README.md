@@ -88,7 +88,7 @@ For more details, see [Railway docs](https://docs.railway.app/guides/projects).
 
 ## Database
 
-The bot uses SQLite3. Two tables are created automatically:
+The bot uses SQLite3. Three tables are created automatically:
 
 ### `checkins`
 ```
@@ -106,6 +106,7 @@ PRIMARY KEY (key)
 
 Currently stores:
 - `start_date` — The event start date in YYYY-MM-DD format
+- `checkin_channel_id` — The preferred channel for manual and midnight daily posts
 
 ## Configuration
 
