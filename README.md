@@ -77,7 +77,6 @@ For more details, see [Railway docs](https://docs.railway.app/guides/projects).
 ### Admin Commands
 
 - **`/setstartdate <YYYY-MM-DD>`** — Set the event start date (requires Administrator)
-  - Setting a different start date clears the previous event's saved check-ins
 - **`/dailydraw`** — Draw 1 random winner from today's check-ins (requires Administrator)
 - **`/finaldraw`** — Draw winners for players with 7/7 check-ins (requires Administrator, minimum 14 eligible players)
 - **`/eligible`** — See how many players have completed 7/7 (requires Administrator)
@@ -91,7 +90,8 @@ The bot uses SQLite3. Two tables are created automatically:
 ```
 user_id (INTEGER)    — Discord user ID
 event_day (INTEGER)  — Day of the event (1-7)
-PRIMARY KEY (user_id, event_day)
+event_start (TEXT)   — Event start date in YYYY-MM-DD format
+PRIMARY KEY (user_id, event_day, event_start)
 ```
 
 ### `settings`

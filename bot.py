@@ -43,29 +43,56 @@ def init_db():
     conn = get_db()
     c = conn.cursor()
     c.execute("""
-    CREATE TABLE IF NOT EXISTS checkins (
-    user_id INTEGER,
-    event_day INTEGER,
-    PRIMARY KEY (user_id, event_day)
-    )
-    """)
-    c.execute("""
     CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
     )
     """)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS checkins (
+    user_id INTEGER,
+    event_day INTEGER,
+    event_start TEXT,
+    PRIMARY KEY (user_id, event_day, event_start)
+    )
+    """)
     c.execute("PRAGMA table_info(checkins)")
-    columns = {row["name"] for row in c.fetchall()}
-    if "event_start" not in columns:
-        c.execute("ALTER TABLE checkins ADD COLUMN event_start TEXT")
+    columns = {row["name"]: row["pk"] for row in c.fetchall()}
+    needs_migration = (
+        "event_start" not in columns or columns.get("event_start") != 3
+    )
+    if needs_migration:
         c.execute("SELECT value FROM settings WHERE key = 'start_date'")
         row = c.fetchone()
-        if row and row["value"]:
+        default_event_start = row["value"] if row and row["value"] else "legacy"
+        c.execute("""
+        CREATE TABLE checkins_new (
+        user_id INTEGER,
+        event_day INTEGER,
+        event_start TEXT,
+        PRIMARY KEY (user_id, event_day, event_start)
+        )
+        """)
+        if "event_start" in columns:
             c.execute(
-                "UPDATE checkins SET event_start = ? WHERE event_start IS NULL",
-                (row["value"],),
+                """
+                INSERT OR IGNORE INTO checkins_new (user_id, event_day, event_start)
+                SELECT user_id, event_day, COALESCE(event_start, ?)
+                FROM checkins
+                """,
+                (default_event_start,),
             )
+        else:
+            c.execute(
+                """
+                INSERT OR IGNORE INTO checkins_new (user_id, event_day, event_start)
+                SELECT user_id, event_day, ?
+                FROM checkins
+                """,
+                (default_event_start,),
+            )
+        c.execute("DROP TABLE checkins")
+        c.execute("ALTER TABLE checkins_new RENAME TO checkins")
     conn.commit()
     conn.close()
 
@@ -104,18 +131,14 @@ def set_start_date(date_str):
     c = conn.cursor()
     c.execute("SELECT value FROM settings WHERE key = 'start_date'")
     row = c.fetchone()
-    c.execute("SELECT COUNT(*) as cnt FROM checkins")
-    existing_checkins = c.fetchone()["cnt"] > 0
-    reset_checkins = existing_checkins and (not row or row["value"] != date_str)
+    changed = bool(not row or row["value"] != date_str)
     with conn:
-        if reset_checkins:
-            c.execute("DELETE FROM checkins")
         c.execute(
             "INSERT OR REPLACE INTO settings (key, value) VALUES ('start_date', ?)",
             (date_str,),
         )
     conn.close()
-    return reset_checkins
+    return changed
 
 def get_current_event_day():
     start = get_start_date()
@@ -186,8 +209,6 @@ async def get_available_commands(interaction: discord.Interaction):
         sync_target = get_sync_target()
         if sync_target:
             registered = await tree.fetch_commands(guild=sync_target)
-        elif interaction.guild_id:
-            registered = await tree.fetch_commands(guild=discord.Object(id=interaction.guild_id))
         else:
             registered = await tree.fetch_commands()
         return {command.name: command.description for command in registered}
@@ -397,10 +418,10 @@ async def setstartdate(interaction: discord.Interaction, date: str):
             "Wrong format. Use YYYY-MM-DD (example: 2026-09-05)", ephemeral=True
         )
         return
-    reset_checkins = set_start_date(date)
+    changed = set_start_date(date)
     message = f"Event start date set to **{date}** (Day 1)."
-    if reset_checkins:
-        message += " Previous event check-ins were cleared."
+    if changed:
+        message += " New check-ins will now be tracked for this event."
     await interaction.response.send_message(
         message, ephemeral=True
     )
