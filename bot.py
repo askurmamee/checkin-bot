@@ -118,6 +118,20 @@ def get_total_checkins_for_day(day):
     conn.close()
     return count
 
+def chunk_lines(lines, prefix="", max_length=1900):
+    chunks = []
+    current = prefix
+    for line in lines:
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > max_length and current:
+            chunks.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        chunks.append(current)
+    return chunks
+
 @bot.event
 async def on_ready():
     init_db()
@@ -260,7 +274,7 @@ async def commands(interaction: discord.Interaction):
     admin_commands = []
     for command in tree.get_commands():
         line = f"`/{command.name}` — {command.description}"
-        if command.name in {"setstartdate", "dailydraw", "finaldraw", "eligible", "todaycheckins"}:
+        if command.checks:
             admin_commands.append(line)
         else:
             user_commands.append(line)
@@ -407,11 +421,13 @@ async def todaycheckins(interaction: discord.Interaction):
             ephemeral=True,
         )
         return
-
-    await interaction.response.send_message(
-        f"**Day {day} check-ins ({len(users)})**\n" + "\n".join(users),
-        ephemeral=True,
+    messages = chunk_lines(
+        users,
+        prefix=f"**Day {day} check-ins ({len(users)})**",
     )
+    await interaction.response.send_message(messages[0], ephemeral=True)
+    for message in messages[1:]:
+        await interaction.followup.send(message, ephemeral=True)
 
 # Error handler for missing permissions
 @setstartdate.error
