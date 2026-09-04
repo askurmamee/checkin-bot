@@ -141,7 +141,10 @@ def admin_only():
 
 async def get_available_commands(interaction: discord.Interaction):
     try:
-        if interaction.guild_id:
+        sync_target = get_sync_target()
+        if sync_target:
+            registered = await tree.fetch_commands(guild=sync_target)
+        elif interaction.guild_id:
             registered = await tree.fetch_commands(guild=discord.Object(id=interaction.guild_id))
         else:
             registered = await tree.fetch_commands()
@@ -298,10 +301,16 @@ async def commands(interaction: discord.Interaction):
             admin_commands.append(line)
         else:
             user_commands.append(line)
-    messages = chunk_lines(
-        user_commands + ["", "**Admin Commands**"] + admin_commands,
-        prefix="**Checkin Bot Commands**\n**User Commands**",
+
+    lines = user_commands[:]
+    has_admin_perms = bool(
+        interaction.guild
+        and getattr(getattr(interaction.user, "guild_permissions", None), "administrator", False)
     )
+    if has_admin_perms and admin_commands:
+        lines.extend(["", "**Admin Commands**", *admin_commands])
+
+    messages = chunk_lines(lines, prefix="**Checkin Bot Commands**\n**User Commands**")
     await interaction.response.send_message(messages[0], ephemeral=True)
     for message in messages[1:]:
         await interaction.followup.send(message, ephemeral=True)
@@ -427,7 +436,7 @@ async def todaycheckins(interaction: discord.Interaction):
     conn = get_db()
     c = conn.cursor()
     c.execute(
-        "SELECT user_id FROM checkins WHERE event_day = ? ORDER BY user_id",
+        "SELECT user_id FROM checkins WHERE event_day = ? ORDER BY rowid",
         (day,),
     )
     users = [f"<@{row['user_id']}>" for row in c.fetchall()]
