@@ -42,57 +42,57 @@ def get_db():
 def init_db():
     conn = get_db()
     c = conn.cursor()
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT
-    )
-    """)
-    c.execute("""
-    CREATE TABLE IF NOT EXISTS checkins (
-    user_id INTEGER,
-    event_day INTEGER,
-    event_start TEXT,
-    PRIMARY KEY (user_id, event_day, event_start)
-    )
-    """)
-    c.execute("PRAGMA table_info(checkins)")
-    columns = {row["name"]: row["pk"] for row in c.fetchall()}
-    needs_migration = (
-        "event_start" not in columns or columns.get("event_start") != 3
-    )
-    if needs_migration:
-        default_event_start = "legacy"
-        c.execute("DROP TABLE IF EXISTS checkins_new")
+    with conn:
         c.execute("""
-        CREATE TABLE checkins_new (
+        CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+        )
+        """)
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS checkins (
         user_id INTEGER,
         event_day INTEGER,
         event_start TEXT,
         PRIMARY KEY (user_id, event_day, event_start)
         )
         """)
-        if "event_start" in columns:
-            c.execute(
-                """
-                INSERT OR IGNORE INTO checkins_new (user_id, event_day, event_start)
-                SELECT user_id, event_day, COALESCE(event_start, ?)
-                FROM checkins
-                """,
-                (default_event_start,),
+        c.execute("PRAGMA table_info(checkins)")
+        columns = {row["name"]: row["pk"] for row in c.fetchall()}
+        needs_migration = (
+            "event_start" not in columns or columns.get("event_start") != 3
+        )
+        if needs_migration:
+            default_event_start = "legacy"
+            c.execute("DROP TABLE IF EXISTS checkins_new")
+            c.execute("""
+            CREATE TABLE checkins_new (
+            user_id INTEGER,
+            event_day INTEGER,
+            event_start TEXT,
+            PRIMARY KEY (user_id, event_day, event_start)
             )
-        else:
-            c.execute(
-                """
-                INSERT OR IGNORE INTO checkins_new (user_id, event_day, event_start)
-                SELECT user_id, event_day, ?
-                FROM checkins
-                """,
-                (default_event_start,),
-            )
-        c.execute("DROP TABLE checkins")
-        c.execute("ALTER TABLE checkins_new RENAME TO checkins")
-    conn.commit()
+            """)
+            if "event_start" in columns:
+                c.execute(
+                    """
+                    INSERT OR IGNORE INTO checkins_new (user_id, event_day, event_start)
+                    SELECT user_id, event_day, COALESCE(event_start, ?)
+                    FROM checkins
+                    """,
+                    (default_event_start,),
+                )
+            else:
+                c.execute(
+                    """
+                    INSERT OR IGNORE INTO checkins_new (user_id, event_day, event_start)
+                    SELECT user_id, event_day, ?
+                    FROM checkins
+                    """,
+                    (default_event_start,),
+                )
+            c.execute("DROP TABLE checkins")
+            c.execute("ALTER TABLE checkins_new RENAME TO checkins")
     conn.close()
 
 def get_start_date():
@@ -226,7 +226,7 @@ async def get_available_commands():
         else:
             registered = await tree.fetch_commands()
         return {command.name: command.description for command in registered}
-    except Exception:
+    except discord.DiscordException:
         return {command.name: command.description for command in tree.get_commands()}
 
 @bot.event
@@ -385,10 +385,13 @@ async def leaderboard(interaction: discord.Interaction):
         )
         return
 
-    lines = [
-        f"{index}. <@{row['user_id']}> — **{row['cnt']}/7**"
-        for index, row in enumerate(rows, start=1)
-    ]
+    lines = []
+    for index, row in enumerate(rows, start=1):
+        member = interaction.guild.get_member(row["user_id"]) if interaction.guild else None
+        display_name = member.display_name if member else f"User {row['user_id']}"
+        lines.append(
+            f"{index}. {display_name} (<@{row['user_id']}>) — **{row['cnt']}/7**"
+        )
     await interaction.response.send_message(
         "**Check-in Leaderboard**\n" + "\n".join(lines),
         ephemeral=False,
@@ -404,7 +407,8 @@ async def commands(interaction: discord.Interaction):
     admin_commands = []
     for command_name, description in sorted(available_commands.items()):
         local_command = local_commands.get(command_name)
-        line = f"`/{command_name}` — {description}"
+        short_description = description if len(description) <= 120 else description[:117] + "..."
+        line = f"`/{command_name}` — {short_description}"
         if local_command and getattr(local_command.callback, "__checkin_admin_command__", False):
             admin_commands.append(line)
         else:
