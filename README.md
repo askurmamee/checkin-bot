@@ -4,10 +4,11 @@ A Discord bot for managing check-in events with daily and final draws. Built wit
 
 ## Features
 
-- **Daily Check-in**: Users react with ✅ to check in each day
+- **Daily Check-in**: Users use `/checkin` or react with 👍 on the daily post
 - **Daily Lucky Draw**: Admin can draw 1 random winner from today's check-ins
 - **Final Lucky Draw**: Admin draws winners from players with 7/7 check-ins (1x 10 SC, 3x 5 SC, 10x 1 SC)
 - **Progress Tracking**: Users can see their check-in progress anytime
+- **Automatic Midnight Posts**: The bot can auto-post the next day's check-in message in Asia/Shanghai time
 
 ## Quick Start
 
@@ -59,6 +60,8 @@ A Discord bot for managing check-in events with daily and final draws. Built wit
 4. Add environment variables in Railway dashboard:
    - `DISCORD_TOKEN` — your Discord bot token
    - `DB_PATH` — set to `/data/checkins.db` (requires volume mount)
+   - `CHECKIN_CHANNEL_ID` — optional fixed channel for the daily auto-post
+   - `DISCORD_GUILD_ID` — optional guild ID for fast guild command sync
 5. Attach a volume to `/data` for persistent database storage
 6. Deploy!
 
@@ -77,10 +80,15 @@ For more details, see [Railway docs](https://docs.railway.app/guides/projects).
 - **`/dailydraw`** — Draw 1 random winner from today's check-ins (requires Administrator)
 - **`/finaldraw`** — Draw winners for players with 7/7 check-ins (requires Administrator, minimum 14 eligible players)
 - **`/eligible`** — See how many players have completed 7/7 (requires Administrator)
+- **`/totalcount`** — Show the total number of check-ins across all members (requires Administrator)
+- **`/resetmembers`** — Clear all member check-ins (requires Administrator)
+- **`/masterreset`** — Clear check-ins, settings, and tracked daily posts (requires Administrator)
+- **`/editmember <user> <value>`** — Adjust a member's total by a signed number such as `+2` or `-1` (requires Administrator)
+- **`/postdailycheckin`** — Manually post today's 👍 check-in message and save that channel for auto-posts (requires Administrator)
 
 ## Database
 
-The bot uses SQLite3. Two tables are created automatically:
+The bot uses SQLite3. Three tables are created automatically:
 
 ### `checkins`
 ```
@@ -98,6 +106,15 @@ PRIMARY KEY (key)
 
 Currently stores:
 - `start_date` — The event start date in YYYY-MM-DD format
+- `checkin_channel_id` — The preferred channel for manual and midnight daily posts
+
+### `daily_messages`
+```
+date (TEXT)        — Message date in YYYY-MM-DD format
+channel_id (TEXT)  — Channel where the daily post was sent
+message_id (TEXT)  — Discord message ID for the tracked 👍 check-in post
+PRIMARY KEY (date)
+```
 
 ## Configuration
 
@@ -107,6 +124,8 @@ Currently stores:
 - `DB_PATH` (optional, default: `checkins.db`) — Path to SQLite database
   - On Railway with volume: use `/data/checkins.db`
   - Locally: use relative path like `checkins.db`
+- `CHECKIN_CHANNEL_ID` (optional) — Default channel for the midnight auto-post until the bot saves a channel from `/postdailycheckin`
+- `DISCORD_GUILD_ID` (optional) — Guild ID to force an immediate guild sync in addition to the global sync
 
 ### Bot Permissions Required
 
@@ -115,6 +134,7 @@ Ensure the bot has these permissions in any channel where it operates:
 - View Channel
 - Send Messages
 - Read Message History
+- Add Reactions
 
 ### Timezone
 
@@ -139,7 +159,7 @@ Each command opens its own connection to the database.
 
 ### Event Handling
 
-The bot uses Discord's slash commands (app_commands) for a modern user interface. All commands are automatically synced to the server on bot startup.
+The bot uses Discord slash commands (`app_commands`) for a modern user interface. On startup it validates that all 11 commands are loaded, refreshes the selected guild scope with those 11 commands when `DISCORD_GUILD_ID` is set or the bot is connected to exactly one guild, and then syncs the global command set.
 
 ## Troubleshooting
 
