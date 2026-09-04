@@ -55,6 +55,17 @@ def init_db():
     value TEXT
     )
     """)
+    c.execute("PRAGMA table_info(checkins)")
+    columns = {row["name"] for row in c.fetchall()}
+    if "event_start" not in columns:
+        c.execute("ALTER TABLE checkins ADD COLUMN event_start TEXT")
+        c.execute("SELECT value FROM settings WHERE key = 'start_date'")
+        row = c.fetchone()
+        if row and row["value"]:
+            c.execute(
+                "UPDATE checkins SET event_start = ? WHERE event_start IS NULL",
+                (row["value"],),
+            )
     conn.commit()
     conn.close()
 
@@ -84,12 +95,18 @@ def get_sync_target():
         print(f"Invalid DISCORD_GUILD_ID: {GUILD_ID!r}. Falling back to global sync.")
         return None
 
+def get_event_start_key():
+    start = get_start_date()
+    return start.isoformat() if start else None
+
 def set_start_date(date_str):
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT value FROM settings WHERE key = 'start_date'")
     row = c.fetchone()
-    reset_checkins = bool(row and row["value"] != date_str)
+    c.execute("SELECT COUNT(*) as cnt FROM checkins")
+    existing_checkins = c.fetchone()["cnt"] > 0
+    reset_checkins = existing_checkins and (not row or row["value"] != date_str)
     with conn:
         if reset_checkins:
             c.execute("DELETE FROM checkins")
@@ -111,9 +128,19 @@ def get_current_event_day():
     return None
 
 def get_total_checkins_for_day(day):
+    event_start = get_event_start_key()
+    if not event_start:
+        return 0
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) as cnt FROM checkins WHERE event_day = ?", (day,))
+    c.execute(
+        """
+        SELECT COUNT(*) as cnt
+        FROM checkins
+        WHERE event_day = ? AND event_start = ?
+        """,
+        (day, event_start),
+    )
     count = c.fetchone()["cnt"]
     conn.close()
     return count
@@ -171,6 +198,7 @@ async def on_ready():
 @tree.command(name="checkin", description="Check in for today")
 async def checkin(interaction: discord.Interaction):
     day = get_current_event_day()
+    event_start = get_event_start_key()
     if day is None:
         await interaction.response.send_message(
             "The event is not active right now or start date is not set.",
@@ -182,8 +210,12 @@ async def checkin(interaction: discord.Interaction):
     c = conn.cursor()
     # Check if already checked in today
     c.execute(
-        "SELECT 1 FROM checkins WHERE user_id = ? AND event_day = ?",
-        (user_id, day),
+        """
+        SELECT 1
+        FROM checkins
+        WHERE user_id = ? AND event_day = ? AND event_start = ?
+        """,
+        (user_id, day, event_start),
     )
     if c.fetchone():
         conn.close()
@@ -193,11 +225,22 @@ async def checkin(interaction: discord.Interaction):
         return
     # Save check-in
     c.execute(
-        "INSERT INTO checkins (user_id, event_day) VALUES (?, ?)", (user_id, day)
+        """
+        INSERT INTO checkins (user_id, event_day, event_start)
+        VALUES (?, ?, ?)
+        """,
+        (user_id, day, event_start),
     )
     conn.commit()
     # Count progress
-    c.execute("SELECT COUNT(*) as cnt FROM checkins WHERE user_id = ?", (user_id,))
+    c.execute(
+        """
+        SELECT COUNT(*) as cnt
+        FROM checkins
+        WHERE user_id = ? AND event_start = ?
+        """,
+        (user_id, event_start),
+    )
     progress = c.fetchone()["cnt"]
     conn.close()
     await interaction.response.send_message(
@@ -208,11 +251,23 @@ async def checkin(interaction: discord.Interaction):
 @tree.command(name="progress", description="See your check-in progress")
 async def progress(interaction: discord.Interaction):
     user_id = interaction.user.id
+    event_start = get_event_start_key()
+    if not event_start:
+        await interaction.response.send_message(
+            "No event is configured yet. Ask an admin to run `/setstartdate YYYY-MM-DD`.",
+            ephemeral=True,
+        )
+        return
     conn = get_db()
     c = conn.cursor()
     c.execute(
-        "SELECT event_day FROM checkins WHERE user_id = ? ORDER BY event_day",
-        (user_id,),
+        """
+        SELECT event_day
+        FROM checkins
+        WHERE user_id = ? AND event_start = ?
+        ORDER BY event_day
+        """,
+        (user_id, event_start),
     )
     days = [row["event_day"] for row in c.fetchall()]
     conn.close()
@@ -252,6 +307,7 @@ async def status(interaction: discord.Interaction):
 @tree.command(name="leaderboard", description="Show the top check-in counts")
 async def leaderboard(interaction: discord.Interaction):
     day = get_current_event_day()
+    event_start = get_event_start_key()
     if day is None:
         await interaction.response.send_message(
             "Event is not active right now.",
@@ -264,11 +320,11 @@ async def leaderboard(interaction: discord.Interaction):
     c.execute("""
     SELECT user_id, COUNT(*) as cnt
     FROM checkins
-    WHERE event_day BETWEEN 1 AND ?
+    WHERE event_start = ? AND event_day BETWEEN 1 AND ?
     GROUP BY user_id
     ORDER BY cnt DESC, user_id ASC
     LIMIT 10
-    """, (day,))
+    """, (event_start, day))
     rows = c.fetchall()
     conn.close()
 
@@ -338,6 +394,7 @@ async def setstartdate(interaction: discord.Interaction, date: str):
 @admin_only()
 async def dailydraw(interaction: discord.Interaction):
     day = get_current_event_day()
+    event_start = get_event_start_key()
     if day is None:
         await interaction.response.send_message(
             "Event is not active today.", ephemeral=True
@@ -349,7 +406,14 @@ async def dailydraw(interaction: discord.Interaction):
     await interaction.response.defer()
     conn = get_db()
     c = conn.cursor()
-    c.execute("SELECT user_id FROM checkins WHERE event_day = ?", (day,))
+    c.execute(
+        """
+        SELECT user_id
+        FROM checkins
+        WHERE event_day = ? AND event_start = ?
+        """,
+        (day, event_start),
+    )
     users = [row["user_id"] for row in c.fetchall()]
     conn.close()
     if not users:
@@ -369,14 +433,16 @@ async def finaldraw(interaction: discord.Interaction):
     # Defer immediately: this command can fetch up to 14 users sequentially,
     # which will blow past Discord's 3-second interaction deadline.
     await interaction.response.defer()
+    event_start = get_event_start_key()
     conn = get_db()
     c = conn.cursor()
     # Get users who have all 7 days
     c.execute("""
     SELECT user_id FROM checkins
+    WHERE event_start = ?
     GROUP BY user_id
     HAVING COUNT(DISTINCT event_day) = 7
-    """)
+    """, (event_start,))
     users = [row["user_id"] for row in c.fetchall()]
     conn.close()
     if len(users) < 14:
@@ -408,15 +474,17 @@ async def finaldraw(interaction: discord.Interaction):
 @tree.command(name="eligible", description="ADMIN: Show how many players have 7/7")
 @admin_only()
 async def eligible(interaction: discord.Interaction):
+    event_start = get_event_start_key()
     conn = get_db()
     c = conn.cursor()
     c.execute("""
     SELECT COUNT(*) as cnt FROM (
     SELECT user_id FROM checkins
+    WHERE event_start = ?
     GROUP BY user_id
     HAVING COUNT(DISTINCT event_day) = 7
     )
-    """)
+    """, (event_start,))
     count = c.fetchone()["cnt"]
     conn.close()
     await interaction.response.send_message(
@@ -427,6 +495,7 @@ async def eligible(interaction: discord.Interaction):
 @admin_only()
 async def todaycheckins(interaction: discord.Interaction):
     day = get_current_event_day()
+    event_start = get_event_start_key()
     if day is None:
         await interaction.response.send_message(
             "Event is not active today.", ephemeral=True
@@ -436,8 +505,13 @@ async def todaycheckins(interaction: discord.Interaction):
     conn = get_db()
     c = conn.cursor()
     c.execute(
-        "SELECT user_id FROM checkins WHERE event_day = ? ORDER BY rowid",
-        (day,),
+        """
+        SELECT user_id
+        FROM checkins
+        WHERE event_day = ? AND event_start = ?
+        ORDER BY rowid
+        """,
+        (day, event_start),
     )
     users = [f"<@{row['user_id']}>" for row in c.fetchall()]
     conn.close()
