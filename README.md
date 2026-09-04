@@ -175,11 +175,13 @@ The bot uses Discord's slash commands (app_commands) for a modern user interface
 
 ## Development
 
-### Basic Validation
+### Syntax Check (No Automated Tests)
 
 ```bash
 python -m py_compile bot.py
 ```
+
+There are currently no automated test suites in this repository.
 
 ### Structure
 
