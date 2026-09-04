@@ -5,7 +5,7 @@ import json
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord import app_commands
 import sqlite3
 from datetime import datetime
@@ -25,6 +25,8 @@ intents.message_content = True
 intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 tree = bot.tree
+CHECKIN_EMOJI = "✅"
+DAILY_POST_CHANNEL_SETTING = "daily_post_channel_id"
 
 def get_db():
     # Use a connection timeout and WAL mode to reduce "database is locked"
@@ -56,6 +58,16 @@ def init_db():
         event_day INTEGER,
         event_start TEXT,
         PRIMARY KEY (user_id, event_day, event_start)
+        )
+        """)
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS daily_posts (
+        event_start TEXT,
+        event_day INTEGER,
+        post_date TEXT,
+        channel_id INTEGER,
+        message_id INTEGER,
+        PRIMARY KEY (event_start, event_day)
         )
         """)
         c.execute("PRAGMA table_info(checkins)")
@@ -97,6 +109,10 @@ def init_db():
         c.execute("""
         CREATE INDEX IF NOT EXISTS idx_checkins_event_day_user
         ON checkins (event_start, event_day, user_id)
+        """)
+        c.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_posts_message_id
+        ON daily_posts (message_id)
         """)
     conn.close()
 
@@ -141,6 +157,9 @@ def get_event_start_key():
     start = get_start_date()
     return start.isoformat() if start else None
 
+def get_today_date():
+    return datetime.now(TZ).date()
+
 def get_setting(key):
     conn = get_db()
     c = conn.cursor()
@@ -172,6 +191,82 @@ def delete_settings_with_prefix(prefix):
             (f"{prefix}%",),
         )
     conn.close()
+
+def get_daily_post_channel_id():
+    value = get_setting(DAILY_POST_CHANNEL_SETTING)
+    return int(value) if value and value.isdigit() else None
+
+def set_daily_post_channel_id(channel_id):
+    set_setting(DAILY_POST_CHANNEL_SETTING, str(channel_id))
+
+def get_daily_post(event_start, day):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        """
+        SELECT event_start, event_day, post_date, channel_id, message_id
+        FROM daily_posts
+        WHERE event_start = ? AND event_day = ?
+        """,
+        (event_start, day),
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def get_daily_post_for_message(message_id):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute(
+        """
+        SELECT event_start, event_day, post_date, channel_id, message_id
+        FROM daily_posts
+        WHERE message_id = ?
+        """,
+        (message_id,),
+    )
+    row = c.fetchone()
+    conn.close()
+    return row
+
+def save_daily_post(event_start, day, post_date, channel_id, message_id):
+    conn = get_db()
+    with conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO daily_posts (
+                event_start, event_day, post_date, channel_id, message_id
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (event_start, day, post_date, channel_id, message_id),
+        )
+    conn.close()
+
+def delete_daily_post(event_start, day):
+    conn = get_db()
+    with conn:
+        conn.execute(
+            "DELETE FROM daily_posts WHERE event_start = ? AND event_day = ?",
+            (event_start, day),
+        )
+    conn.close()
+
+def delete_daily_posts_for_event(event_start):
+    conn = get_db()
+    with conn:
+        conn.execute("DELETE FROM daily_posts WHERE event_start = ?", (event_start,))
+    conn.close()
+
+def build_daily_checkin_message(event_start, day, closed=False):
+    status = "closed" if closed else "open"
+    return (
+        f"## {CHECKIN_EMOJI} Daily Check-in\n"
+        f"Event start date: **{event_start}**\n"
+        f"Current day: **Day {day}/7**\n"
+        f"React with {CHECKIN_EMOJI} on this message to check in.\n"
+        f"Remove your reaction if you need to undo your check-in.\n"
+        f"Today's status: **{status}**."
+    )
 
 def get_daily_close_key(event_start, day):
     return f"daily_closed:{event_start}:{day}"
@@ -218,10 +313,45 @@ def clear_event_checkins(event_start):
     conn.close()
     return cursor.rowcount
 
+def record_checkin(user_id, day, event_start):
+    conn = get_db()
+    with conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO checkins (user_id, event_day, event_start)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, day, event_start),
+        )
+        progress = conn.execute(
+            """
+            SELECT COUNT(*) as cnt
+            FROM checkins
+            WHERE user_id = ? AND event_start = ?
+            """,
+            (user_id, event_start),
+        ).fetchone()["cnt"]
+    conn.close()
+    return progress
+
+def remove_checkin(user_id, day, event_start):
+    conn = get_db()
+    with conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM checkins
+            WHERE user_id = ? AND event_day = ? AND event_start = ?
+            """,
+            (user_id, day, event_start),
+        )
+    conn.close()
+    return cursor.rowcount
+
 def master_reset_data():
     conn = get_db()
     with conn:
         conn.execute("DELETE FROM checkins")
+        conn.execute("DELETE FROM daily_posts")
         conn.execute("DELETE FROM settings")
     conn.close()
 
@@ -362,6 +492,71 @@ async def get_available_commands():
     except discord.DiscordException:
         return {command.name: command.description for command in tree.get_commands()}
 
+async def fetch_channel_message(channel_id, message_id):
+    channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+    message = await channel.fetch_message(message_id)
+    return channel, message
+
+async def remove_payload_reaction(message, emoji, user_id):
+    try:
+        await message.remove_reaction(emoji, discord.Object(id=user_id))
+    except discord.DiscordException:
+        pass
+
+async def create_or_get_daily_post(channel_id, event_start, day):
+    existing = get_daily_post(event_start, day)
+    today = get_today_date().isoformat()
+
+    if existing:
+        try:
+            channel, message = await fetch_channel_message(
+                int(existing["channel_id"]),
+                int(existing["message_id"]),
+            )
+            return channel, message, False
+        except discord.DiscordException:
+            delete_daily_post(event_start, day)
+
+    channel = bot.get_channel(channel_id) or await bot.fetch_channel(channel_id)
+    message = await channel.send(
+        build_daily_checkin_message(
+            event_start,
+            day,
+            closed=is_daily_checkin_closed(day, event_start),
+        )
+    )
+    await message.add_reaction(CHECKIN_EMOJI)
+    save_daily_post(event_start, day, today, channel.id, message.id)
+    return channel, message, True
+
+async def update_daily_post_message(event_start, day):
+    post = get_daily_post(event_start, day)
+    if not post:
+        return None
+    try:
+        _, message = await fetch_channel_message(
+            int(post["channel_id"]),
+            int(post["message_id"]),
+        )
+        await message.edit(
+            content=build_daily_checkin_message(
+                event_start,
+                day,
+                closed=is_daily_checkin_closed(day, event_start),
+            )
+        )
+        return message
+    except discord.DiscordException:
+        return None
+
+async def ensure_daily_post_for_current_day():
+    event_start = get_event_start_key()
+    day = get_current_event_day()
+    channel_id = get_daily_post_channel_id()
+    if not event_start or day is None or not channel_id:
+        return None
+    return await create_or_get_daily_post(channel_id, event_start, day)
+
 @bot.event
 async def on_ready():
     init_db()
@@ -377,8 +572,78 @@ async def on_ready():
             print(f"Synced {len(synced)} global commands")
     except Exception as e:
         print(e)
+    try:
+        await ensure_daily_post_for_current_day()
+    except discord.DiscordException as e:
+        print(f"Failed to ensure daily check-in post: {e}")
+    if not daily_post_scheduler.is_running():
+        daily_post_scheduler.start()
 
-@tree.command(name="checkin", description="Check in for today")
+@tasks.loop(minutes=1)
+async def daily_post_scheduler():
+    try:
+        await ensure_daily_post_for_current_day()
+    except discord.DiscordException as e:
+        print(f"Daily post scheduler error: {e}")
+
+@daily_post_scheduler.before_loop
+async def before_daily_post_scheduler():
+    await bot.wait_until_ready()
+
+@bot.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    if payload.guild_id is None or payload.user_id == bot.user.id:
+        return
+
+    post = get_daily_post_for_message(payload.message_id)
+    if not post:
+        return
+
+    try:
+        channel, message = await fetch_channel_message(
+            int(post["channel_id"]),
+            int(post["message_id"]),
+        )
+    except discord.DiscordException:
+        return
+
+    if payload.emoji.name != CHECKIN_EMOJI:
+        await remove_payload_reaction(message, payload.emoji, payload.user_id)
+        return
+
+    current_event_start = get_event_start_key()
+    current_day = get_current_event_day()
+    if (
+        current_event_start != post["event_start"]
+        or current_day != post["event_day"]
+        or is_daily_checkin_closed(post["event_day"], post["event_start"])
+    ):
+        await remove_payload_reaction(message, payload.emoji, payload.user_id)
+        return
+
+    record_checkin(payload.user_id, post["event_day"], post["event_start"])
+
+@bot.event
+async def on_raw_reaction_remove(payload: discord.RawReactionActionEvent):
+    if payload.guild_id is None or payload.user_id == bot.user.id:
+        return
+    if payload.emoji.name != CHECKIN_EMOJI:
+        return
+
+    post = get_daily_post_for_message(payload.message_id)
+    if not post:
+        return
+
+    current_event_start = get_event_start_key()
+    current_day = get_current_event_day()
+    if current_event_start != post["event_start"] or current_day != post["event_day"]:
+        return
+    if is_daily_checkin_closed(post["event_day"], post["event_start"]):
+        return
+
+    remove_checkin(payload.user_id, post["event_day"], post["event_start"])
+
+@tree.command(name="checkin", description="Get today's official reaction-based check-in post")
 async def checkin(interaction: discord.Interaction):
     day = get_current_event_day()
     event_start = get_event_start_key()
@@ -394,48 +659,24 @@ async def checkin(interaction: discord.Interaction):
             ephemeral=True,
         )
         return
-    user_id = interaction.user.id
-    conn = get_db()
-    c = conn.cursor()
-    # Check if already checked in today
-    c.execute(
-        """
-        SELECT 1
-        FROM checkins
-        WHERE user_id = ? AND event_day = ? AND event_start = ?
-        """,
-        (user_id, day, event_start),
-    )
-    if c.fetchone():
-        conn.close()
+    channel_id = get_daily_post_channel_id()
+    if not channel_id:
         await interaction.response.send_message(
-            f"You already checked in for Day {day} today!", ephemeral=True
+            "No daily check-in channel is configured yet. Ask an admin to run `/setupcheckinpost`.",
+            ephemeral=True,
         )
         return
-    # Save check-in
-    c.execute(
-        """
-        INSERT INTO checkins (user_id, event_day, event_start)
-        VALUES (?, ?, ?)
-        """,
-        (user_id, day, event_start),
-    )
-    conn.commit()
-    # Count progress
-    c.execute(
-        """
-        SELECT COUNT(*) as cnt
-        FROM checkins
-        WHERE user_id = ? AND event_start = ?
-        """,
-        (user_id, event_start),
-    )
-    progress = c.fetchone()["cnt"]
-    conn.close()
-    await interaction.response.send_message(
-        f" **Checked in for Day {day}!**\nYour progress: **{progress}/7**",
-        ephemeral=False,
-    )
+    try:
+        _, message, _ = await create_or_get_daily_post(channel_id, event_start, day)
+        await interaction.response.send_message(
+            f"React with {CHECKIN_EMOJI} on today's official check-in post:\n{message.jump_url}",
+            ephemeral=True,
+        )
+    except discord.DiscordException:
+        await interaction.response.send_message(
+            "I couldn't find or create today's official check-in post. Ask an admin to run `/setupcheckinpost`.",
+            ephemeral=True,
+        )
 
 @tree.command(name="progress", description="See your check-in progress")
 async def progress(interaction: discord.Interaction):
@@ -486,11 +727,18 @@ async def status(interaction: discord.Interaction):
         return
 
     today_count = get_total_checkins_for_day(day)
+    post = get_daily_post(start.isoformat(), day)
+    post_status = "missing"
+    if post:
+        post_status = "ready"
+    channel_id = get_daily_post_channel_id()
     await interaction.response.send_message(
         f"Event start date: **{start.isoformat()}**\n"
         f"Current day: **Day {day}/7**\n"
         f"Today's check-ins: **{today_count}**\n"
-        f"Today's check-in is **{'closed' if is_daily_checkin_closed(day) else 'open'}**.",
+        f"Today's check-in is **{'closed' if is_daily_checkin_closed(day) else 'open'}**.\n"
+        f"Today's official post is **{post_status}**.\n"
+        f"Daily post channel: **{channel_id or 'not configured'}**.",
         ephemeral=True,
     )
 
@@ -585,6 +833,16 @@ async def setstartdate(interaction: discord.Interaction, date: str):
     message = f"Event start date set to **{date}** (Day 1)."
     if changed:
         message += " New check-ins will now be tracked for this event."
+    channel_id = get_daily_post_channel_id()
+    if channel_id:
+        try:
+            _, post, created = await create_or_get_daily_post(channel_id, date, 1)
+            if created:
+                message += f" Today's official post is ready: {post.jump_url}"
+            else:
+                message += f" Today's official post already exists: {post.jump_url}"
+        except discord.DiscordException:
+            message += " I could not create today's official post."
     await interaction.response.send_message(
         message, ephemeral=True
     )
@@ -623,6 +881,7 @@ async def resettoday(interaction: discord.Interaction):
     removed = clear_day_checkins(day, event_start)
     delete_setting(get_daily_close_key(event_start, day))
     delete_setting("last_winners:daily")
+    await update_daily_post_message(event_start, day)
     await interaction.response.send_message(
         f"Reset Day {day} for event **{event_start}**. "
         f"Removed **{removed}** check-ins and reopened today's check-in.",
@@ -644,6 +903,9 @@ async def resetevent(interaction: discord.Interaction):
     delete_settings_with_prefix(f"daily_closed:{event_start}:")
     delete_setting("last_winners:daily")
     delete_setting("last_winners:final")
+    day = get_current_event_day()
+    if day is not None:
+        await update_daily_post_message(event_start, day)
     await interaction.response.send_message(
         f"Reset the current event **{event_start}** to zero. "
         f"Removed **{removed}** check-ins.",
@@ -669,6 +931,7 @@ async def enddaily(interaction: discord.Interaction):
         return
 
     close_daily_checkin(day, event_start)
+    await update_daily_post_message(event_start, day)
     await interaction.response.send_message(
         f"Day {day} is now closed for event **{event_start}**. "
         "Weekly progress was not reset.",
@@ -861,6 +1124,7 @@ async def todaycheckins(interaction: discord.Interaction):
             "Event is not active today.", ephemeral=True
         )
         return
+    post = get_daily_post(event_start, day)
 
     conn = get_db()
     c = conn.cursor()
@@ -882,9 +1146,15 @@ async def todaycheckins(interaction: discord.Interaction):
             ephemeral=True,
         )
         return
+    header = f"**Day {day} check-ins ({len(users)})**"
+    if post:
+        header += (
+            f"\nOfficial post: "
+            f"https://discord.com/channels/{interaction.guild_id}/{post['channel_id']}/{post['message_id']}"
+        )
     messages = chunk_lines(
         users,
-        prefix=f"**Day {day} check-ins ({len(users)})**",
+        prefix=header,
     )
     await interaction.response.send_message(messages[0], ephemeral=True)
     for message in messages[1:]:
@@ -907,9 +1177,13 @@ async def masterreset(interaction: discord.Interaction, confirm: str):
         ephemeral=True,
     )
 
-@tree.command(name="setupcheckinpost", description="ADMIN: Post a check-in setup message in this channel")
+@tree.command(name="setupcheckinpost", description="ADMIN: Set the daily post channel and create today's check-in post")
+@app_commands.describe(channel="Optional channel for the official daily check-in post")
 @admin_only()
-async def setupcheckinpost(interaction: discord.Interaction):
+async def setupcheckinpost(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel | None = None,
+):
     start = get_start_date()
     day = get_current_event_day()
     if not start:
@@ -918,32 +1192,25 @@ async def setupcheckinpost(interaction: discord.Interaction):
             ephemeral=True,
         )
         return
-
-    lines = [
-        "## ✅ Check-in Event",
-        f"Event start date: **{start.isoformat()}**",
-    ]
     if day is None:
-        lines.append("The 7-day event is not active right now.")
-    else:
-        lines.append(f"Current day: **Day {day}/7**")
-        lines.append(
-            f"Today's check-in is **{'closed' if is_daily_checkin_closed(day) else 'open'}**."
+        await interaction.response.send_message(
+            "The event is not active right now, so there is no daily post to create.",
+            ephemeral=True,
         )
-    lines.extend(
-        [
-            "",
-            "Use these commands:",
-            "- `/checkin` — check in for today",
-            "- `/progress` — see your progress",
-            "- `/status` — see event status",
-            "- `/leaderboard` — see top check-ins",
-            "- `/commands` — see all commands",
-        ]
+        return
+
+    target_channel = channel or interaction.channel
+    set_daily_post_channel_id(target_channel.id)
+    _, message, created = await create_or_get_daily_post(
+        target_channel.id,
+        start.isoformat(),
+        day,
     )
-    await interaction.channel.send("\n".join(lines))
     await interaction.response.send_message(
-        "Posted the check-in setup message in this channel.",
+        (
+            f"Daily check-in channel set to {target_channel.mention}. "
+            f"{'Created' if created else 'Reused'} today's official post: {message.jump_url}"
+        ),
         ephemeral=True,
     )
 

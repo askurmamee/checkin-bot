@@ -4,7 +4,7 @@ A Discord bot for managing check-in events with daily and final draws. Built wit
 
 ## Features
 
-- **Daily Check-in**: Users react with ✅ to check in each day
+- **Daily Check-in Posts**: The bot creates one official daily post and users react with ✅ to check in
 - **Daily Lucky Draw**: Admin can draw 1 random winner from today's check-ins
 - **Final Lucky Draw**: Admin draws winners from players with 7/7 check-ins (1x 10 SC, 3x 5 SC, 10x 1 SC)
 - **Progress Tracking**: Users can see their check-in progress anytime
@@ -51,6 +51,10 @@ A Discord bot for managing check-in events with daily and final draws. Built wit
    python bot.py
    ```
 
+6. **Configure the daily check-in post channel**:
+   - Run `/setstartdate YYYY-MM-DD`
+   - Run `/setupcheckinpost` in the channel where the daily post should appear
+
 ### Deployment to Railway
 
 1. Push your code to GitHub
@@ -68,7 +72,7 @@ For more details, see [Railway docs](https://docs.railway.app/guides/projects).
 
 ### User Commands
 
-- **`/checkin`** — Check in for the current day
+- **`/checkin`** — Get a link to today's official reaction-based check-in post
 - **`/progress`** — View your check-in progress (X/7 days)
 - **`/status`** — See whether the event is active, the current day, and today's total check-ins
 - **`/leaderboard`** — Show the top check-in counts
@@ -86,7 +90,7 @@ For more details, see [Railway docs](https://docs.railway.app/guides/projects).
 - **`/notifywinners <daily|final> [message]`** — DM the most recent draw winners (requires Administrator)
 - **`/eligible`** — See how many players have completed 7/7 (requires Administrator)
 - **`/todaycheckins`** — List who has checked in today (requires Administrator)
-- **`/setupcheckinpost`** — Post a check-in setup/instructions message in the current channel (requires Administrator)
+- **`/setupcheckinpost [channel]`** — Set the official daily check-in channel and create today's post (requires Administrator)
 - **`/masterreset <MASTER RESET>`** — Clear all check-ins, winners, and settings across every event (requires Administrator)
 
 ## Database
@@ -112,6 +116,7 @@ Currently stores:
 - `start_date` — The event start date in YYYY-MM-DD format
 - `daily_closed:<event_start>:<day>` — Whether a day's check-in has been manually closed
 - `last_winners:daily` / `last_winners:final` — The most recent winners used by `/notifywinners`
+- `daily_post_channel_id` — The channel used for automatic daily check-in posts
 
 ## Configuration
 
@@ -156,6 +161,7 @@ Each command opens its own connection to the database.
 ### Event Handling
 
 The bot uses Discord's slash commands (app_commands) for a modern user interface. All commands are automatically synced to the server on bot startup.
+The bot also creates one official daily check-in post per active day in the configured channel and records ✅ reactions on that post as check-ins.
 
 ## Troubleshooting
 

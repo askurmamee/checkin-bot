@@ -101,6 +101,24 @@ class BotTests(unittest.TestCase):
             },
         )
 
+    def test_daily_post_storage_round_trip(self):
+        bot.set_daily_post_channel_id(12345)
+        bot.save_daily_post("2099-01-01", 1, "2099-01-01", 12345, 67890)
+
+        self.assertEqual(bot.get_daily_post_channel_id(), 12345)
+        post = bot.get_daily_post("2099-01-01", 1)
+        self.assertEqual(post["channel_id"], 12345)
+        self.assertEqual(post["message_id"], 67890)
+        self.assertEqual(bot.get_daily_post_for_message(67890)["event_day"], 1)
+
+    def test_record_and_remove_checkin(self):
+        progress = bot.record_checkin(1, 1, "2099-01-01")
+        self.assertEqual(progress, 1)
+        progress = bot.record_checkin(1, 2, "2099-01-01")
+        self.assertEqual(progress, 2)
+        removed = bot.remove_checkin(1, 2, "2099-01-01")
+        self.assertEqual(removed, 1)
+
     def test_chunk_lines_splits_long_lines_and_keeps_first_prefix(self):
         chunks = bot.chunk_lines(["x" * 80], prefix="HEADER", max_length=40)
 
