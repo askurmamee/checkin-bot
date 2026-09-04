@@ -132,6 +132,13 @@ def chunk_lines(lines, prefix="", max_length=1900):
         chunks.append(current)
     return chunks
 
+def admin_only():
+    def decorator(func):
+        wrapped = app_commands.checks.has_permissions(administrator=True)(func)
+        setattr(wrapped, "__checkin_admin_command__", True)
+        return wrapped
+    return decorator
+
 @bot.event
 async def on_ready():
     init_db()
@@ -274,7 +281,7 @@ async def commands(interaction: discord.Interaction):
     admin_commands = []
     for command in tree.get_commands():
         line = f"`/{command.name}` — {command.description}"
-        if command.checks:
+        if getattr(command.callback, "__checkin_admin_command__", False):
             admin_commands.append(line)
         else:
             user_commands.append(line)
@@ -290,7 +297,7 @@ async def commands(interaction: discord.Interaction):
 
 @tree.command(name="setstartdate", description="ADMIN: Set the event start date (YYYY-MM-DD)")
 @app_commands.describe(date="Start date in YYYY-MM-DD format (example: 2026-09-05")
-@app_commands.checks.has_permissions(administrator=True)
+@admin_only()
 async def setstartdate(interaction: discord.Interaction, date: str):
     try:
         datetime.strptime(date, "%Y-%m-%d")
@@ -308,7 +315,7 @@ async def setstartdate(interaction: discord.Interaction, date: str):
     )
 
 @tree.command(name="dailydraw", description="ADMIN: Draw 1 Daily Lucky Star winner")
-@app_commands.checks.has_permissions(administrator=True)
+@admin_only()
 async def dailydraw(interaction: discord.Interaction):
     day = get_current_event_day()
     if day is None:
@@ -337,7 +344,7 @@ async def dailydraw(interaction: discord.Interaction):
     )
 
 @tree.command(name="finaldraw", description="ADMIN: Draw the Final Lucky Draw winners (only players with 7/7)")
-@app_commands.checks.has_permissions(administrator=True)
+@admin_only()
 async def finaldraw(interaction: discord.Interaction):
     # Defer immediately: this command can fetch up to 14 users sequentially,
     # which will blow past Discord's 3-second interaction deadline.
@@ -379,7 +386,7 @@ async def finaldraw(interaction: discord.Interaction):
     await interaction.followup.send(message)
 
 @tree.command(name="eligible", description="ADMIN: Show how many players have 7/7")
-@app_commands.checks.has_permissions(administrator=True)
+@admin_only()
 async def eligible(interaction: discord.Interaction):
     conn = get_db()
     c = conn.cursor()
@@ -397,7 +404,7 @@ async def eligible(interaction: discord.Interaction):
     )
 
 @tree.command(name="todaycheckins", description="ADMIN: List today's checked-in players")
-@app_commands.checks.has_permissions(administrator=True)
+@admin_only()
 async def todaycheckins(interaction: discord.Interaction):
     day = get_current_event_day()
     if day is None:
