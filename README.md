@@ -107,6 +107,8 @@ Currently stores:
 - `DB_PATH` (optional, default: `checkins.db`) — Path to SQLite database
   - On Railway with volume: use `/data/checkins.db`
   - Locally: use relative path like `checkins.db`
+- `DISCORD_GUILD_ID` (optional) — A guild/server ID to sync slash commands to immediately while testing
+  - If omitted, commands are synced globally and may take longer to appear
 
 ### Bot Permissions Required
 
