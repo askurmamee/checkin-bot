@@ -1,4 +1,3 @@
-import asyncio
 import os
 import random
 import sqlite3
@@ -329,11 +328,11 @@ class CheckInBot(commands.Bot):
         self.local_command_names = local_names
 
     def validate_synced_commands(self, synced_commands, scope: str):
-        synced_names = sorted(command.name for command in synced_commands)
-        expected_names = sorted(EXPECTED_COMMAND_NAMES)
-        if synced_names != expected_names:
+        synced_names = {command.name for command in synced_commands}
+        missing_names = sorted(set(EXPECTED_COMMAND_NAMES) - synced_names)
+        if missing_names:
             raise RuntimeError(
-                f"Expected {expected_names} in {scope} but synced {synced_names}"
+                f"Missing expected commands in {scope}: {missing_names}"
             )
 
     async def sync_registered_commands(self):
@@ -351,7 +350,6 @@ class CheckInBot(commands.Bot):
         self.guild_sync_counts = {}
         for guild_id in guild_ids:
             guild = discord.Object(id=guild_id)
-            self.tree.clear_commands(guild=guild)
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
             self.guild_sync_counts[guild_id] = len(synced)
@@ -433,7 +431,6 @@ async def midnight_post_task():
     channel = await resolve_checkin_channel()
     if channel is None:
         print("Midnight reached but no valid check-in channel is configured.")
-        await asyncio.sleep(60)
         return
 
     created, message_id = await post_daily_checkin(channel)
@@ -441,7 +438,6 @@ async def midnight_post_task():
         print(f"Midnight auto-post created message {message_id}")
     else:
         print(f"Midnight auto-post skipped; today's message {message_id} already exists")
-    await asyncio.sleep(60)
 
 
 @midnight_post_task.before_loop
