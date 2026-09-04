@@ -4,10 +4,12 @@ A Discord bot for managing check-in events with daily and final draws. Built wit
 
 ## Features
 
-- **Daily Check-in**: Users react with ✅ to check in each day
+- **Daily Check-in**: Users can use `/checkin` or react with 👍 on the daily post
 - **Daily Lucky Draw**: Admin can draw 1 random winner from today's check-ins
 - **Final Lucky Draw**: Admin draws winners from players with 7/7 check-ins (1x 10 SC, 3x 5 SC, 10x 1 SC)
 - **Progress Tracking**: Users can see their check-in progress anytime
+- **Admin Controls**: Full admin reset/edit/summary command set
+- **Midnight Auto-Post**: Bot posts a new daily check-in message at 00:00 Asia/Shanghai
 
 ## Quick Start
 
@@ -77,6 +79,18 @@ For more details, see [Railway docs](https://docs.railway.app/guides/projects).
 - **`/dailydraw`** — Draw 1 random winner from today's check-ins (requires Administrator)
 - **`/finaldraw`** — Draw winners for players with 7/7 check-ins (requires Administrator, minimum 14 eligible players)
 - **`/eligible`** — See how many players have completed 7/7 (requires Administrator)
+- **`/totalcount`** — Show total check-ins across all members (requires Administrator)
+- **`/resetmembers`** — Reset all member check-in records (requires Administrator)
+- **`/masterreset`** — Clear event data (check-ins, settings, daily messages) (requires Administrator)
+- **`/editmember <user> <value>`** — Adjust one member's check-in total (requires Administrator)
+- **`/postdailycheckin`** — Manually post today's reaction check-in message (requires Administrator)
+
+## Reaction Check-ins
+
+- Daily check-in posts include a 👍 reaction.
+- Members can click 👍 to register a check-in for the current event day.
+- The bot only records 👍 reactions on tracked daily check-in messages.
+- Auto-post runs every midnight in **Asia/Shanghai (UTC+8)**.
 
 ## Database
 
@@ -98,6 +112,14 @@ PRIMARY KEY (key)
 
 Currently stores:
 - `start_date` — The event start date in YYYY-MM-DD format
+
+### `daily_messages`
+```
+date (TEXT)        — YYYY-MM-DD for daily message
+channel_id (TEXT)  — Channel where daily post was sent
+message_id (TEXT)  — Daily message ID
+PRIMARY KEY (date)
+```
 
 ## Configuration
 
@@ -153,11 +175,13 @@ The bot uses Discord's slash commands (app_commands) for a modern user interface
 
 ## Development
 
-### Running Tests
+### Syntax Check (No Automated Tests)
 
 ```bash
-python test_reaction_post.js  # Test script (note: currently not integrated)
+python -m py_compile bot.py
 ```
+
+There are currently no automated test suites in this repository.
 
 ### Structure
 

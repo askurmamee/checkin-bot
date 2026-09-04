@@ -53,7 +53,7 @@ You should see:
 ```
 Bot is online as YourBotName#1234
 Using database at: /path/to/checkins.db
-Synced 6 commands
+Synced X commands
 ```
 
 ## Testing
@@ -63,10 +63,16 @@ Synced 6 commands
 - [ ] Bot comes online and syncs commands
 - [ ] `/setstartdate 2026-09-05` works (admin only)
 - [ ] `/checkin` works and saves to database
+- [ ] Reacting with 👍 on the daily post records check-in
 - [ ] `/progress` shows correct count
 - [ ] `/dailydraw` draws a winner
 - [ ] `/eligible` shows player count
 - [ ] `/finaldraw` works with 14+ players
+- [ ] `/totalcount` shows total check-ins
+- [ ] `/resetmembers` resets all check-ins
+- [ ] `/masterreset` clears event data
+- [ ] `/editmember` updates one member's check-ins
+- [ ] `/postdailycheckin` posts a daily message with 👍
 
 ### Database Testing
 
@@ -191,7 +197,7 @@ sudo systemctl logs checkin-bot -f
 - [ ] Add command logging to database
 - [ ] Add user statistics/leaderboards
 - [ ] Create web dashboard for stats
-- [ ] Add automated daily message posting (currently manual)
+- [x] Automated daily message posting at midnight (Asia/Shanghai)
 - [ ] Implement pinning integration (see `docs/pinning_integration.md`)
 
 ## Questions or Issues?
