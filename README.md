@@ -4,7 +4,7 @@ A Discord bot for managing check-in events with daily and final draws. Built wit
 
 ## Features
 
-- **Daily Check-in**: Users react with ✅ to check in each day
+- **Daily Check-in Posts**: The bot creates one official daily post and users react with ✅ to check in
 - **Daily Lucky Draw**: Admin can draw 1 random winner from today's check-ins
 - **Final Lucky Draw**: Admin draws winners from players with 7/7 check-ins (1x 10 SC, 3x 5 SC, 10x 1 SC)
 - **Progress Tracking**: Users can see their check-in progress anytime
@@ -51,6 +51,10 @@ A Discord bot for managing check-in events with daily and final draws. Built wit
    python bot.py
    ```
 
+6. **Configure the daily check-in post channel**:
+   - Run `/setstartdate YYYY-MM-DD`
+   - Run `/setupcheckinpost` in the channel where the daily post should appear
+
 ### Deployment to Railway
 
 1. Push your code to GitHub
@@ -68,15 +72,26 @@ For more details, see [Railway docs](https://docs.railway.app/guides/projects).
 
 ### User Commands
 
-- **`/checkin`** — Check in for the current day
+- **`/checkin`** — Get a link to today's official reaction-based check-in post
 - **`/progress`** — View your check-in progress (X/7 days)
+- **`/status`** — See whether the event is active, the current day, and today's total check-ins
+- **`/leaderboard`** — Show the top check-in counts
+- **`/commands`** — Show the available bot commands
 
 ### Admin Commands
 
 - **`/setstartdate <YYYY-MM-DD>`** — Set the event start date (requires Administrator)
+- **`/resetuser <member>`** — Reset one user's current-event progress to zero (requires Administrator)
+- **`/resettoday`** — Reset today's check-ins for everyone and reopen today's check-in (requires Administrator)
+- **`/resetevent`** — Reset the current weekly event's check-ins to zero without clearing history from older events (requires Administrator)
+- **`/enddaily`** — Close today's daily check-in without resetting weekly progress (requires Administrator)
 - **`/dailydraw`** — Draw 1 random winner from today's check-ins (requires Administrator)
 - **`/finaldraw`** — Draw winners for players with 7/7 check-ins (requires Administrator, minimum 14 eligible players)
+- **`/notifywinners <daily|final> [message]`** — DM the most recent draw winners (requires Administrator)
 - **`/eligible`** — See how many players have completed 7/7 (requires Administrator)
+- **`/todaycheckins`** — List who has checked in today (requires Administrator)
+- **`/setupcheckinpost [channel]`** — Set the official daily check-in channel and create today's post (requires Administrator)
+- **`/masterreset <MASTER RESET>`** — Clear all check-ins, winners, and settings across every event (requires Administrator)
 
 ## Database
 
@@ -86,7 +101,8 @@ The bot uses SQLite3. Two tables are created automatically:
 ```
 user_id (INTEGER)    — Discord user ID
 event_day (INTEGER)  — Day of the event (1-7)
-PRIMARY KEY (user_id, event_day)
+event_start (TEXT)   — Event start date in YYYY-MM-DD format
+PRIMARY KEY (user_id, event_day, event_start)
 ```
 
 ### `settings`
@@ -98,6 +114,9 @@ PRIMARY KEY (key)
 
 Currently stores:
 - `start_date` — The event start date in YYYY-MM-DD format
+- `daily_closed:<event_start>:<day>` — Whether a day's check-in has been manually closed
+- `last_winners:daily` / `last_winners:final` — The most recent winners used by `/notifywinners`
+- `daily_post_channel_id` — The channel used for automatic daily check-in posts
 
 ## Configuration
 
@@ -107,6 +126,8 @@ Currently stores:
 - `DB_PATH` (optional, default: `checkins.db`) — Path to SQLite database
   - On Railway with volume: use `/data/checkins.db`
   - Locally: use relative path like `checkins.db`
+- `DISCORD_GUILD_ID` (optional) — A guild/server ID to sync slash commands to immediately while testing
+  - If omitted, commands are synced globally and may take longer to appear
 
 ### Bot Permissions Required
 
@@ -140,6 +161,7 @@ Each command opens its own connection to the database.
 ### Event Handling
 
 The bot uses Discord's slash commands (app_commands) for a modern user interface. All commands are automatically synced to the server on bot startup.
+The bot also creates one official daily check-in post per active day in the configured channel and records ✅ reactions on that post as check-ins.
 
 ## Troubleshooting
 
