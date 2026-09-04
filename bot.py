@@ -319,11 +319,11 @@ class CheckInBot(commands.Bot):
 
     def validate_expected_commands(self):
         local_names = sorted(command.name for command in self.tree.get_commands(guild=None))
-        expected_names = sorted(EXPECTED_COMMAND_NAMES)
-        if local_names != expected_names:
+        missing_names = sorted(set(EXPECTED_COMMAND_NAMES) - set(local_names))
+        if missing_names:
             raise RuntimeError(
-                f"Expected {len(expected_names)} commands but loaded "
-                f"{len(local_names)}: {local_names}"
+                f"Missing expected local commands: {missing_names}. "
+                f"Loaded commands: {local_names}"
             )
         self.local_command_names = local_names
 
@@ -394,9 +394,12 @@ async def post_daily_checkin(channel):
 
     message_text = f"**Daily Check-in — {today}**\n\nReact with 👍 to check in for today!"
     message = await channel.send(message_text)
-    await message.add_reaction("👍")
     set_daily_message(today, channel.id, message.id)
     set_checkin_channel_id(channel.id)
+    try:
+        await message.add_reaction("👍")
+    except discord.HTTPException as error:
+        print(f"Posted message {message.id} but failed to add 👍 reaction: {error}")
     print(f"Posted daily check-in message {message.id} in channel {channel.id}")
     return True, message.id
 

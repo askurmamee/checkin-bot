@@ -159,7 +159,7 @@ Each command opens its own connection to the database.
 
 ### Event Handling
 
-The bot uses Discord slash commands (`app_commands`) for a modern user interface. On startup it validates that all 11 commands are loaded, refreshes the selected guild scope with those 11 commands when immediate guild sync is possible, and then syncs the global command set.
+The bot uses Discord slash commands (`app_commands`) for a modern user interface. On startup it validates that all 11 commands are loaded, refreshes the selected guild scope with those 11 commands when `DISCORD_GUILD_ID` is set or the bot is connected to exactly one guild, and then syncs the global command set.
 
 ## Troubleshooting
 
