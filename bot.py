@@ -328,21 +328,24 @@ class CheckInBot(commands.Bot):
             )
         self.local_command_names = local_names
 
+    def validate_synced_commands(self, synced_commands, scope: str):
+        synced_names = sorted(command.name for command in synced_commands)
+        expected_names = sorted(EXPECTED_COMMAND_NAMES)
+        if synced_names != expected_names:
+            raise RuntimeError(
+                f"Expected {expected_names} in {scope} but synced {synced_names}"
+            )
+
     async def sync_registered_commands(self):
         self.validate_expected_commands()
         global_commands = await self.tree.sync()
         self.global_sync_count = len(global_commands)
-        expected_count = len(EXPECTED_COMMAND_NAMES)
-        if self.global_sync_count != expected_count:
-            raise RuntimeError(
-                f"Expected to sync {expected_count} global commands but synced "
-                f"{self.global_sync_count}"
-            )
+        self.validate_synced_commands(global_commands, "global scope")
 
         guild_ids = []
         if TARGET_GUILD_ID:
             guild_ids = [TARGET_GUILD_ID]
-        else:
+        elif len(self.guilds) == 1:
             guild_ids = [guild.id for guild in self.guilds]
 
         self.guild_sync_counts = {}
@@ -352,11 +355,7 @@ class CheckInBot(commands.Bot):
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
             self.guild_sync_counts[guild_id] = len(synced)
-            if self.guild_sync_counts[guild_id] != expected_count:
-                raise RuntimeError(
-                    f"Expected to sync {expected_count} commands to guild {guild_id} "
-                    f"but synced {self.guild_sync_counts[guild_id]}"
-                )
+            self.validate_synced_commands(synced, f"guild {guild_id}")
 
         self.commands_synced = True
 

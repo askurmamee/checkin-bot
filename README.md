@@ -117,7 +117,7 @@ Currently stores:
   - On Railway with volume: use `/data/checkins.db`
   - Locally: use relative path like `checkins.db`
 - `CHECKIN_CHANNEL_ID` (optional) — Preferred channel for the midnight auto-post
-- `DISCORD_GUILD_ID` (optional) — Guild ID to sync commands immediately in addition to the global sync
+- `DISCORD_GUILD_ID` (optional) — Guild ID to force an immediate guild sync in addition to the global sync
 
 ### Bot Permissions Required
 
@@ -151,7 +151,7 @@ Each command opens its own connection to the database.
 
 ### Event Handling
 
-The bot uses Discord slash commands (`app_commands`) for a modern user interface. On startup it validates that all 11 commands are loaded, syncs them globally, and also syncs them to the configured guild or connected guilds for immediate availability.
+The bot uses Discord slash commands (`app_commands`) for a modern user interface. On startup it validates that all 11 commands are loaded, syncs them globally, and also syncs them to `DISCORD_GUILD_ID` (or the only connected guild) for immediate availability when possible.
 
 ## Troubleshooting
 
