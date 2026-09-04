@@ -6,7 +6,6 @@ from zoneinfo import ZoneInfo
 import discord
 from discord.ext import commands
 from discord import app_commands
-from discord.utils import escape_markdown, escape_mentions
 import sqlite3
 from datetime import datetime
 import random
@@ -100,30 +99,31 @@ def init_db():
         """)
     conn.close()
 
-def get_start_date():
-    conn = get_db()
-    c = conn.cursor()
-    c.execute("SELECT value FROM settings WHERE key = 'start_date'")
-    row = c.fetchone()
-    conn.close()
-    if row:
-        try:
-            return datetime.strptime(row["value"], "%Y-%m-%d").date()
-        except ValueError:
-            print(
-                "Invalid start_date found in settings table. "
-                "Reset it with /setstartdate YYYY-MM-DD."
-            )
-            return None
-    return None
-
-def get_start_date_error_message():
+def read_start_date():
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT value FROM settings WHERE key = 'start_date'")
     row = c.fetchone()
     conn.close()
     if not row:
+        return None, "missing"
+    if row:
+        try:
+            return datetime.strptime(row["value"], "%Y-%m-%d").date(), "valid"
+        except ValueError:
+            print(
+                "Invalid start_date found in settings table. "
+                "Reset it with /setstartdate YYYY-MM-DD."
+            )
+            return None, "invalid"
+
+def get_start_date():
+    start_date, _ = read_start_date()
+    return start_date
+
+def get_start_date_error_message():
+    _, status = read_start_date()
+    if status == "missing":
         return "No event is configured yet. Set a start date first."
     return "Stored event start date is invalid. Reset it with /setstartdate YYYY-MM-DD."
 
@@ -402,11 +402,8 @@ async def leaderboard(interaction: discord.Interaction):
 
     lines = []
     for index, row in enumerate(rows, start=1):
-        member = interaction.guild.get_member(row["user_id"]) if interaction.guild else None
-        display_name = member.display_name if member else f"User {row['user_id']}"
-        safe_name = escape_mentions(escape_markdown(display_name))
         lines.append(
-            f"{index}. {safe_name} (<@{row['user_id']}>) — **{row['cnt']}/7**"
+            f"{index}. User ID {row['user_id']} (<@{row['user_id']}>) — **{row['cnt']}/7**"
         )
     await interaction.response.send_message(
         "**Check-in Leaderboard**\n" + "\n".join(lines),
