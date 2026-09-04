@@ -439,7 +439,7 @@ async def finaldraw(interaction: discord.Interaction):
     # Get users who have all 7 days
     c.execute("""
     SELECT user_id FROM checkins
-    WHERE event_start = ?
+    WHERE event_start = ? AND event_day BETWEEN 1 AND 7
     GROUP BY user_id
     HAVING COUNT(DISTINCT event_day) = 7
     """, (event_start,))
@@ -480,7 +480,7 @@ async def eligible(interaction: discord.Interaction):
     c.execute("""
     SELECT COUNT(*) as cnt FROM (
     SELECT user_id FROM checkins
-    WHERE event_start = ?
+    WHERE event_start = ? AND event_day BETWEEN 1 AND 7
     GROUP BY user_id
     HAVING COUNT(DISTINCT event_day) = 7
     )
