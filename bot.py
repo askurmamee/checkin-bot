@@ -62,9 +62,7 @@ def init_db():
         "event_start" not in columns or columns.get("event_start") != 3
     )
     if needs_migration:
-        c.execute("SELECT value FROM settings WHERE key = 'start_date'")
-        row = c.fetchone()
-        default_event_start = row["value"] if row and row["value"] else "legacy"
+        default_event_start = "legacy"
         c.execute("DROP TABLE IF EXISTS checkins_new")
         c.execute("""
         CREATE TABLE checkins_new (
@@ -389,7 +387,7 @@ async def commands(interaction: discord.Interaction):
     }
     user_commands = []
     admin_commands = []
-    for command_name, description in available_commands.items():
+    for command_name, description in sorted(available_commands.items()):
         local_command = local_commands.get(command_name)
         line = f"`/{command_name}` — {description}"
         if local_command and getattr(local_command.callback, "__checkin_admin_command__", False):
