@@ -51,6 +51,56 @@ class BotTests(unittest.TestCase):
 
         self.assertEqual(bot.get_total_checkins_for_day(1), 1)
 
+    def test_daily_close_flag_is_scoped_to_event_and_day(self):
+        self.assertFalse(bot.is_daily_checkin_closed(1, "2099-01-01"))
+        bot.close_daily_checkin(1, "2099-01-01")
+
+        self.assertTrue(bot.is_daily_checkin_closed(1, "2099-01-01"))
+        self.assertFalse(bot.is_daily_checkin_closed(2, "2099-01-01"))
+        self.assertFalse(bot.is_daily_checkin_closed(1, "2099-01-08"))
+
+    def test_reset_helpers_only_clear_target_scope(self):
+        conn = sqlite3.connect(self.path)
+        conn.execute(
+            "INSERT INTO checkins (user_id, event_day, event_start) VALUES (?, ?, ?)",
+            (1, 1, "2099-01-01"),
+        )
+        conn.execute(
+            "INSERT INTO checkins (user_id, event_day, event_start) VALUES (?, ?, ?)",
+            (1, 2, "2099-01-01"),
+        )
+        conn.execute(
+            "INSERT INTO checkins (user_id, event_day, event_start) VALUES (?, ?, ?)",
+            (2, 1, "2099-01-01"),
+        )
+        conn.execute(
+            "INSERT INTO checkins (user_id, event_day, event_start) VALUES (?, ?, ?)",
+            (3, 1, "2099-01-08"),
+        )
+        conn.commit()
+        conn.close()
+
+        self.assertEqual(bot.clear_user_checkins(1, "2099-01-01"), 2)
+        self.assertEqual(bot.clear_day_checkins(1, "2099-01-01"), 1)
+        self.assertEqual(bot.clear_event_checkins("2099-01-08"), 1)
+
+    def test_winner_storage_round_trip(self):
+        bot.store_last_winners(
+            "daily",
+            [{"user_id": 1, "prize": "1 SC"}],
+            event_start="2099-01-01",
+            day=1,
+        )
+
+        self.assertEqual(
+            bot.load_last_winners("daily"),
+            {
+                "event_start": "2099-01-01",
+                "day": 1,
+                "winners": [{"user_id": 1, "prize": "1 SC"}],
+            },
+        )
+
     def test_chunk_lines_splits_long_lines_and_keeps_first_prefix(self):
         chunks = bot.chunk_lines(["x" * 80], prefix="HEADER", max_length=40)
 

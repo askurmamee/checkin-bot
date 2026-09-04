@@ -77,10 +77,17 @@ For more details, see [Railway docs](https://docs.railway.app/guides/projects).
 ### Admin Commands
 
 - **`/setstartdate <YYYY-MM-DD>`** — Set the event start date (requires Administrator)
+- **`/resetuser <member>`** — Reset one user's current-event progress to zero (requires Administrator)
+- **`/resettoday`** — Reset today's check-ins for everyone and reopen today's check-in (requires Administrator)
+- **`/resetevent`** — Reset the current weekly event's check-ins to zero without clearing history from older events (requires Administrator)
+- **`/enddaily`** — Close today's daily check-in without resetting weekly progress (requires Administrator)
 - **`/dailydraw`** — Draw 1 random winner from today's check-ins (requires Administrator)
 - **`/finaldraw`** — Draw winners for players with 7/7 check-ins (requires Administrator, minimum 14 eligible players)
+- **`/notifywinners <daily|final> [message]`** — DM the most recent draw winners (requires Administrator)
 - **`/eligible`** — See how many players have completed 7/7 (requires Administrator)
 - **`/todaycheckins`** — List who has checked in today (requires Administrator)
+- **`/setupcheckinpost`** — Post a check-in setup/instructions message in the current channel (requires Administrator)
+- **`/masterreset <MASTER RESET>`** — Clear all check-ins, winners, and settings across every event (requires Administrator)
 
 ## Database
 
@@ -103,6 +110,8 @@ PRIMARY KEY (key)
 
 Currently stores:
 - `start_date` — The event start date in YYYY-MM-DD format
+- `daily_closed:<event_start>:<day>` — Whether a day's check-in has been manually closed
+- `last_winners:daily` / `last_winners:final` — The most recent winners used by `/notifywinners`
 
 ## Configuration
 

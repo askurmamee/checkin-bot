@@ -1,6 +1,7 @@
 # ====================== SETTINGS ======================
 import os
 import sys
+import json
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 import discord
@@ -140,6 +141,123 @@ def get_event_start_key():
     start = get_start_date()
     return start.isoformat() if start else None
 
+def get_setting(key):
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT value FROM settings WHERE key = ?", (key,))
+    row = c.fetchone()
+    conn.close()
+    return row["value"] if row else None
+
+def set_setting(key, value):
+    conn = get_db()
+    with conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+    conn.close()
+
+def delete_setting(key):
+    conn = get_db()
+    with conn:
+        conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+    conn.close()
+
+def delete_settings_with_prefix(prefix):
+    conn = get_db()
+    with conn:
+        conn.execute(
+            "DELETE FROM settings WHERE key LIKE ?",
+            (f"{prefix}%",),
+        )
+    conn.close()
+
+def get_daily_close_key(event_start, day):
+    return f"daily_closed:{event_start}:{day}"
+
+def is_daily_checkin_closed(day, event_start=None):
+    current_event_start = event_start or get_event_start_key()
+    if not current_event_start:
+        return False
+    return get_setting(get_daily_close_key(current_event_start, day)) == "1"
+
+def close_daily_checkin(day, event_start=None):
+    current_event_start = event_start or get_event_start_key()
+    if not current_event_start:
+        return
+    set_setting(get_daily_close_key(current_event_start, day), "1")
+
+def clear_user_checkins(user_id, event_start):
+    conn = get_db()
+    with conn:
+        cursor = conn.execute(
+            "DELETE FROM checkins WHERE user_id = ? AND event_start = ?",
+            (user_id, event_start),
+        )
+    conn.close()
+    return cursor.rowcount
+
+def clear_day_checkins(day, event_start):
+    conn = get_db()
+    with conn:
+        cursor = conn.execute(
+            "DELETE FROM checkins WHERE event_day = ? AND event_start = ?",
+            (day, event_start),
+        )
+    conn.close()
+    return cursor.rowcount
+
+def clear_event_checkins(event_start):
+    conn = get_db()
+    with conn:
+        cursor = conn.execute(
+            "DELETE FROM checkins WHERE event_start = ?",
+            (event_start,),
+        )
+    conn.close()
+    return cursor.rowcount
+
+def master_reset_data():
+    conn = get_db()
+    with conn:
+        conn.execute("DELETE FROM checkins")
+        conn.execute("DELETE FROM settings")
+    conn.close()
+
+def store_last_winners(draw_type, winners, *, event_start=None, day=None):
+    payload = {
+        "event_start": event_start,
+        "day": day,
+        "winners": winners,
+    }
+    set_setting(f"last_winners:{draw_type}", json.dumps(payload))
+
+def load_last_winners(draw_type):
+    raw = get_setting(f"last_winners:{draw_type}")
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+def build_winner_dm(draw_type, winner_info, payload, custom_message=None):
+    prize = winner_info.get("prize", "your prize")
+    if draw_type == "daily":
+        base_message = (
+            f"🎉 You won the Daily Lucky Star draw for Day {payload.get('day')}! "
+            f"Prize: **{prize}**."
+        )
+    else:
+        base_message = (
+            f"🎉 You won the final event draw for the event starting "
+            f"**{payload.get('event_start')}**! Prize: **{prize}**."
+        )
+    if custom_message:
+        return f"{base_message}\n\n{custom_message}"
+    return base_message
+
 def set_start_date(date_str):
     conn = get_db()
     c = conn.cursor()
@@ -270,6 +388,12 @@ async def checkin(interaction: discord.Interaction):
             ephemeral=True,
         )
         return
+    if is_daily_checkin_closed(day, event_start):
+        await interaction.response.send_message(
+            f"Day {day} check-in has been closed by an admin.",
+            ephemeral=True,
+        )
+        return
     user_id = interaction.user.id
     conn = get_db()
     c = conn.cursor()
@@ -365,7 +489,8 @@ async def status(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"Event start date: **{start.isoformat()}**\n"
         f"Current day: **Day {day}/7**\n"
-        f"Today's check-ins: **{today_count}**",
+        f"Today's check-ins: **{today_count}**\n"
+        f"Today's check-in is **{'closed' if is_daily_checkin_closed(day) else 'open'}**.",
         ephemeral=True,
     )
 
@@ -464,6 +589,92 @@ async def setstartdate(interaction: discord.Interaction, date: str):
         message, ephemeral=True
     )
 
+@tree.command(name="resetuser", description="ADMIN: Reset one user's current event progress")
+@app_commands.describe(member="The member whose current event check-ins should be cleared")
+@admin_only()
+async def resetuser(interaction: discord.Interaction, member: discord.Member):
+    event_start = get_event_start_key()
+    if not event_start:
+        await interaction.response.send_message(
+            get_start_date_error_message(),
+            ephemeral=True,
+        )
+        return
+
+    removed = clear_user_checkins(member.id, event_start)
+    await interaction.response.send_message(
+        f"Reset **{member.display_name}** for event **{event_start}**. "
+        f"Removed **{removed}** check-ins.",
+        ephemeral=True,
+    )
+
+@tree.command(name="resettoday", description="ADMIN: Reset today's check-ins for everyone")
+@admin_only()
+async def resettoday(interaction: discord.Interaction):
+    day = get_current_event_day()
+    event_start = get_event_start_key()
+    if day is None or not event_start:
+        await interaction.response.send_message(
+            "No active daily check-in is available to reset.",
+            ephemeral=True,
+        )
+        return
+
+    removed = clear_day_checkins(day, event_start)
+    delete_setting(get_daily_close_key(event_start, day))
+    delete_setting("last_winners:daily")
+    await interaction.response.send_message(
+        f"Reset Day {day} for event **{event_start}**. "
+        f"Removed **{removed}** check-ins and reopened today's check-in.",
+        ephemeral=True,
+    )
+
+@tree.command(name="resetevent", description="ADMIN: Reset the current weekly event to zero")
+@admin_only()
+async def resetevent(interaction: discord.Interaction):
+    event_start = get_event_start_key()
+    if not event_start:
+        await interaction.response.send_message(
+            get_start_date_error_message(),
+            ephemeral=True,
+        )
+        return
+
+    removed = clear_event_checkins(event_start)
+    delete_settings_with_prefix(f"daily_closed:{event_start}:")
+    delete_setting("last_winners:daily")
+    delete_setting("last_winners:final")
+    await interaction.response.send_message(
+        f"Reset the current event **{event_start}** to zero. "
+        f"Removed **{removed}** check-ins.",
+        ephemeral=True,
+    )
+
+@tree.command(name="enddaily", description="ADMIN: Close today's daily check-in without resetting the event")
+@admin_only()
+async def enddaily(interaction: discord.Interaction):
+    day = get_current_event_day()
+    event_start = get_event_start_key()
+    if day is None or not event_start:
+        await interaction.response.send_message(
+            "No active daily check-in is available to close.",
+            ephemeral=True,
+        )
+        return
+    if is_daily_checkin_closed(day, event_start):
+        await interaction.response.send_message(
+            f"Day {day} is already closed for event **{event_start}**.",
+            ephemeral=True,
+        )
+        return
+
+    close_daily_checkin(day, event_start)
+    await interaction.response.send_message(
+        f"Day {day} is now closed for event **{event_start}**. "
+        "Weekly progress was not reset.",
+        ephemeral=True,
+    )
+
 @tree.command(name="dailydraw", description="ADMIN: Draw 1 Daily Lucky Star winner")
 @admin_only()
 async def dailydraw(interaction: discord.Interaction):
@@ -495,6 +706,12 @@ async def dailydraw(interaction: discord.Interaction):
         return
     winner_id = random.choice(users)
     winner = await bot.fetch_user(winner_id)
+    store_last_winners(
+        "daily",
+        [{"user_id": winner_id, "prize": "1 SC"}],
+        event_start=event_start,
+        day=day,
+    )
     await interaction.followup.send(
         f" **Daily Lucky Star Winner (Day {day})** \n"
         f"Congratulations {winner.mention}!\n"
@@ -539,6 +756,7 @@ async def finaldraw(interaction: discord.Interaction):
         [("1 SC", 10)]
     )
     results = []
+    winners_payload = []
     index = 0
     for prize_name, count in prizes:
         for _ in range(count):
@@ -547,7 +765,13 @@ async def finaldraw(interaction: discord.Interaction):
             uid = users[index]
             member = await bot.fetch_user(uid)
             results.append(f"**{prize_name}** → {member.mention}")
+            winners_payload.append({"user_id": uid, "prize": prize_name})
             index += 1
+    store_last_winners(
+        "final",
+        winners_payload,
+        event_start=event_start,
+    )
     message = " **FINAL LUCKY DRAW WINNERS** \n\n" + "\n".join(results)
     await interaction.followup.send(message)
 
@@ -575,6 +799,56 @@ async def eligible(interaction: discord.Interaction):
     conn.close()
     await interaction.response.send_message(
         f"Players with 7/7: **{count}**", ephemeral=True
+    )
+
+@tree.command(name="notifywinners", description="ADMIN: DM the most recent daily or final winners")
+@app_commands.describe(
+    draw_type="Choose 'daily' or 'final'",
+    custom_message="Optional extra message to include in the DM",
+)
+@admin_only()
+async def notifywinners(
+    interaction: discord.Interaction,
+    draw_type: str,
+    custom_message: str | None = None,
+):
+    normalized = draw_type.lower().strip()
+    if normalized not in {"daily", "final"}:
+        await interaction.response.send_message(
+            "Draw type must be `daily` or `final`.",
+            ephemeral=True,
+        )
+        return
+
+    payload = load_last_winners(normalized)
+    if not payload or not payload.get("winners"):
+        await interaction.response.send_message(
+            f"No stored {normalized} winners were found yet.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    sent_count = 0
+    failed_count = 0
+    for winner_info in payload["winners"]:
+        try:
+            winner = await bot.fetch_user(int(winner_info["user_id"]))
+            await winner.send(
+                build_winner_dm(
+                    normalized,
+                    winner_info,
+                    payload,
+                    custom_message=custom_message,
+                )
+            )
+            sent_count += 1
+        except Exception:
+            failed_count += 1
+
+    await interaction.followup.send(
+        f"Winner notifications sent: **{sent_count}**. Failed: **{failed_count}**.",
+        ephemeral=True,
     )
 
 @tree.command(name="todaycheckins", description="ADMIN: List today's checked-in players")
@@ -616,6 +890,63 @@ async def todaycheckins(interaction: discord.Interaction):
     for message in messages[1:]:
         await interaction.followup.send(message, ephemeral=True)
 
+@tree.command(name="masterreset", description="ADMIN: Clear all check-ins and settings")
+@app_commands.describe(confirm="Type MASTER RESET to confirm")
+@admin_only()
+async def masterreset(interaction: discord.Interaction, confirm: str):
+    if confirm != "MASTER RESET":
+        await interaction.response.send_message(
+            "Confirmation text must be exactly `MASTER RESET`.",
+            ephemeral=True,
+        )
+        return
+
+    master_reset_data()
+    await interaction.response.send_message(
+        "Master reset complete. All events, check-ins, winners, and settings were cleared.",
+        ephemeral=True,
+    )
+
+@tree.command(name="setupcheckinpost", description="ADMIN: Post a check-in setup message in this channel")
+@admin_only()
+async def setupcheckinpost(interaction: discord.Interaction):
+    start = get_start_date()
+    day = get_current_event_day()
+    if not start:
+        await interaction.response.send_message(
+            get_start_date_error_message(),
+            ephemeral=True,
+        )
+        return
+
+    lines = [
+        "## ✅ Check-in Event",
+        f"Event start date: **{start.isoformat()}**",
+    ]
+    if day is None:
+        lines.append("The 7-day event is not active right now.")
+    else:
+        lines.append(f"Current day: **Day {day}/7**")
+        lines.append(
+            f"Today's check-in is **{'closed' if is_daily_checkin_closed(day) else 'open'}**."
+        )
+    lines.extend(
+        [
+            "",
+            "Use these commands:",
+            "- `/checkin` — check in for today",
+            "- `/progress` — see your progress",
+            "- `/status` — see event status",
+            "- `/leaderboard` — see top check-ins",
+            "- `/commands` — see all commands",
+        ]
+    )
+    await interaction.channel.send("\n".join(lines))
+    await interaction.response.send_message(
+        "Posted the check-in setup message in this channel.",
+        ephemeral=True,
+    )
+
 async def admin_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         if interaction.response.is_done():
@@ -631,7 +962,20 @@ async def admin_error(interaction: discord.Interaction, error):
     else:
         raise error
 
-for command in (setstartdate, dailydraw, finaldraw, eligible, todaycheckins):
+for command in (
+    setstartdate,
+    resetuser,
+    resettoday,
+    resetevent,
+    enddaily,
+    dailydraw,
+    finaldraw,
+    eligible,
+    notifywinners,
+    todaycheckins,
+    masterreset,
+    setupcheckinpost,
+):
     command.error(admin_error)
 
 def main():
