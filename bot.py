@@ -117,6 +117,16 @@ def get_start_date():
             return None
     return None
 
+def get_start_date_error_message():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT value FROM settings WHERE key = 'start_date'")
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return "No event is configured yet. Set a start date first."
+    return "Stored event start date is invalid. Reset it with /setstartdate YYYY-MM-DD."
+
 def get_sync_target():
     if not GUILD_ID:
         return None
@@ -309,7 +319,7 @@ async def progress(interaction: discord.Interaction):
     event_start = get_event_start_key()
     if not event_start:
         await interaction.response.send_message(
-            "No event is configured yet. Ask an admin to run `/setstartdate YYYY-MM-DD`.",
+            get_start_date_error_message(),
             ephemeral=True,
         )
         return
@@ -339,7 +349,7 @@ async def status(interaction: discord.Interaction):
     day = get_current_event_day()
     if not start:
         await interaction.response.send_message(
-            "No event is configured yet. Ask an admin to run `/setstartdate YYYY-MM-DD`.",
+            get_start_date_error_message(),
             ephemeral=True,
         )
         return
@@ -503,7 +513,7 @@ async def finaldraw(interaction: discord.Interaction):
     event_start = get_event_start_key()
     if not event_start:
         await interaction.followup.send(
-            "No event is configured yet. Set a start date first.",
+            get_start_date_error_message(),
             ephemeral=True,
         )
         return
@@ -550,7 +560,7 @@ async def eligible(interaction: discord.Interaction):
     event_start = get_event_start_key()
     if not event_start:
         await interaction.response.send_message(
-            "No event is configured yet. Set a start date first.",
+            get_start_date_error_message(),
             ephemeral=True,
         )
         return
